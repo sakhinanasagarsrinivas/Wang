@@ -1,0 +1,90 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{pifont}
+\usepackage{xcolor}
+
+
+\title{Patent Claims}
+\author{Hi Hi}
+\date{May 2025}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+\noindent\textbf{\textsf{\textcolor{red}{\ding{55}} \textbf{What You \emph{Are Not} Claiming }}}
+\begin{enumerate}
+    \item \textbf{Specific Prompt Wording}:
+    \begin{itemize}
+        \item The method uses prompts, but we \textbf{do not claim} ownership of the \textbf{wording} or \textbf{the idea of using prompts} in general.
+    \end{itemize}
+    
+    \item \textbf{General Use of LLMs}:
+    \begin{itemize}
+        \item We \textbf{do not claim} the \textbf{LLM itself}, or its generic usage, only \textbf{how} it is used \textbf{in our novel pipeline}.
+    \end{itemize}
+    
+    \item \textbf{Generic Reward Model Concept}:
+    \begin{itemize}
+        \item We \textbf{do not claim} the \textbf{concept of reward models} themselves, only \textbf{our specific reward application}, combining \textbf{multi-metric scoring} and \textbf{threshold-based filtering} for \textbf{domain-specific dataset generation}.
+    \end{itemize}
+    
+    \item \textbf{General Document Retrieval or Clustering}:
+    \begin{itemize}
+        \item We \textbf{do not claim} retrieval or clustering in isolation, but \textbf{only as part of our structured generation pipeline}.
+    \end{itemize}
+
+    \item We \textbf{do not claim} Fine-tuned Models or their deployment — we disclaim ownership over the resulting fine-tuned models or their usage.
+
+    \item \textbf{We anchor our claims in the specific, integrated, technical pipeline that leverages these known elements in a novel way. What Are we Claiming For : The Method : An automated pipeline for generating, validating, and storing domain-specific synthetic datasets for PFD/PID interpretation and generation, not the models or prompts themselves}
+\end{enumerate}
+
+
+\section*{Independent Claim}
+
+\textbf{A computer-implemented method for automated generation, validation, and organization of synthetic instruction–response pairs tailored for fine-tuning domain-specialized small-scale language models in process flow diagram (PFD) and piping and instrumentation diagram (PID) interpretation, analysis, and generation for novel chemicals, the method comprising:}
+
+\begin{enumerate}
+    \item receiving, via a data ingestion module, a seed dataset comprising human-authored instruction–response or preference pairs representative of domain-specific chemical process tasks;
+    
+    \item invoking a pre-existing large-scale language model (LLM) as a generation engine---\textbf{explicitly disclaiming any claim of ownership over the LLM architecture, its training data, underlying generation algorithms, and the structure, wording, or phrasing of prompt templates used in the generation process}---to generate multiple types of synthetic instruction–response pairs through recursive conditioning on the seed dataset, the generated synthetic instruction–response pairs including:
+        \begin{enumerate}
+            \item \textbf{Factual instruction–response pairs} capturing domain-specific factual knowledge in chemical process engineering  to provide the foundational domain knowledge to small-scale language model's;
+            \item \textbf{Direct Preference Optimization (DPO) instruction–response pairs} comprising paired candidate responses labeled as preferred and dispreferred, focusing on aligning the small-scale language model’s preferences toward more helpful, correct, and contextually appropriate responses. It refines the small-scale language model’s response behavior by training it to prefer higher-quality responses over lower-quality resonse;
+            \item \textbf{SynDIP instruction–response pairs} comprising structured process context (including background of the process, operational overview, engineering rationale, chemical reactions, reaction mechanisms, and descriptions of unit operations, materials, and flows), along with corresponding sequentially generated PFD textual descriptions and PID textual descriptions;
+            \item \textbf{LogiCore instruction–response pairs} comprising multi-step reasoning with explicit chain-of-thought explanations capturing procedural, logical, and engineering reasoning steps for analyzing or justifying PFDs and PIDs;            
+            \item \textbf{Retrieval-Augmented Instruction-Tuning (RAIT) instruction–response pairs} comprising:
+            \begin{itemize}
+                \item \textbf{Local RAIT} instruction–response pairs grounded in semantically coherent intra-document content chunks; and
+                \item \textbf{Global RAIT} instruction–response pairs grounded in cross-document semantic clusters supporting multi-source reasoning and synthesis;
+                \item "Documents" here refer to external technical knowledge sources, typically engineering documents. 
+            \end{itemize}
+        \end{enumerate}
+
+    
+    \item evaluating the generated synthetic instruction–response pairs using a configurable multi-metric reward evaluation engine---\textbf{explicitly disclaiming any claim of ownership over the reward model architecture, scoring functions, or underlying algorithms}---by applying a weighted combination of predefined quality metrics including helpfulness, factual correctness, logical coherence, response complexity, and verbosity;
+    
+    \item computing a preference gap for DPO instruction–response pairs by comparing reward scores between preferred and dispreferred responses and filtering based on a predefined preference threshold;
+    
+    \item grounding the synthetic instruction–response pairs in external document-derived context by:
+    \begin{enumerate}
+        \item retrieving and parsing domain-specific technical content from structured or unstructured knowledge sources;
+        \item clustering the retrieved content into semantically similar groups using vector-based similarity computations to form knowledge clusters for Local and Global RAIT;
+        \item generating multi-scale, context-grounded responses including both brief factual outputs and detailed explanatory outputs;
+    \end{enumerate}
+    
+    \item applying predefined quality thresholds to retain only validated synthetic instruction–response pairs meeting or exceeding metrics for factual alignment, coherence, and contextual relevance;
+    
+    \item storing the reward-validated synthetic instruction–response pairs in a structured digital repository for use in fine-tuning computationally efficient, domain-specialized small-scale language models---\textbf{explicitly disclaiming any claim of ownership over the fine-tuned models or their deployment mechanisms}.
+\end{enumerate}
+
+
+\end{document}
+
+
+
+
+
+
