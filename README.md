@@ -1,10 +1,4 @@
 
-Understood — since you already have the official support letter from the company confirming sponsorship and travel, your email can now **focus exclusively on requesting the NOC** (No Objection Certificate).
-
-Here’s a precise and professional version of the email:
-
----
-
 **Subject:** Request for No Objection Certificate (NOC) for Canadian Visa Application
 
 Dear \[HR Manager's Name],
@@ -27,11 +21,5 @@ Thank you for your assistance.
 
 Best regards,
 **Dr. Sagar Srinivas Sakhinana**
-Senior Computer Science Researcher
-TCS Research and Innovation
-[sagar.sakhinana@tcs.com](mailto:sagar.sakhinana@tcs.com)
-+91 7975599267
 
----
 
-Let me know if you'd like me to help you **draft the NOC text itself** in case HR asks you to share a template.
