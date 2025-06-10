@@ -1,48 +1,17 @@
+Subject: Urgent: Request to Pay KDD 2025 Registration via Personal Credit Card for Visa Processing
 
-Subject: Request for No Objection Certificate (NOC) for Canadian Visa Application
+Dear ,
 
-Dear \[HR Manager's Name],
+I hope you are doing well.
 
-I hope you're doing well.
+I wanted to bring to your attention that the KDD 2025 conference organizers do not release the official invitation letter unless the registration fee is paid. This letter is mandatory for initiating the Canadian visa application, which currently takes around four weeks for processing, followed by three additional weeks for passport stamping.
 
-As part of my upcoming official travel to Canada to attend the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD 2025), scheduled from August 3 to August 7, 2025 in Toronto, I am in the process of submitting my Temporary Resident Visa application to the Canadian High Commission.
+Due to this requirement, the entire visa team and I have been delayed in submitting our visa applications, as we are still awaiting the registration confirmation. This delay is entirely due to the pending payment and may severely impact our ability to receive visas in time for the conference.
 
-While I already have the official letter of support issued by TCS, the visa process additionally requires a No Objection Certificate (NOC) from the employer. I kindly request the NOC on official letterhead confirming:
+In light of this, I kindly request your approval to proceed with the payment using my personal credit card, and claim reimbursement through the standard process afterward. This will allow me to obtain the invitation letter immediately and move forward with the visa process without further delays.
 
-* TCS has no objection to my travel for the specified period
-* I am currently employed with TCS and have been granted leave
-* I am expected to return and resume my duties post-travel
+Please let me know if this is acceptable, or if you need any additional information from my end.
 
-It would be greatly appreciated if the NOC could be issued at the earliest to support the timely completion of my visa application.
+Warm regards,
 
-Please let me know if any further information or documentation is needed.
-
-Thank you for your assistance.
-
-Best regards,
-Dr. Sagar Srinivas Sakhinana
-
-
-
-To Whom It May Concern,
-
-Subject: No Objection Certificate for International Travel
-
-This is to formally certify that Dr. Sagar Srinivas Sakhinana is employed with  as a Senior Computer Science Researcher within our Research and Innovation division, based in Bangalore, India.
-
-Dr. Sagar Srinivas Sakhinana has been invited to participate in the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD 2025), a prestigious international conference to be held in Toronto, Canada, from August 3 to August 7, 2025.
-
-** has no objection whatsoever to Dr. Sagar Srinivas Sakhinana undertaking this official travel to Canada for the stated purpose. His leave for the aforementioned dates has been formally approved. He remains a full-time employee of ** and is expected to resume his duties immediately upon return to India following the conclusion of the conference.
-
-The company fully supports Dr. Sagar Srinivas Sakhinana’s participation in this event, recognizing it as a valuable opportunity aligned with his current role and our broader research and innovation objectives.
-
-This certificate is issued at the request of the employee to support his Temporary Resident Visa application to the Canadian High Commission.
-
-Should you require any further information or clarification, please feel free to contact us.
-
-Sincerely,
-\[Name of HR/Reporting Manager]
-
-
-
-
+Senior Research Scientist
