@@ -1,131 +1,912 @@
-Of course. Here is a high-level explanation of what the code does, tracing the flow from inputs to outputs.
+\section*{EXPECTILE REGRESSION}
+
+\textbf{Offline dataset.}  
+We assume an offline transition dataset
+\[
+\mathcal{D} = \{(s,a,r,s')\}.
+\]
+
+\begin{itemize}
+    \item $s \in \mathcal{S}$ : state
+    \item $a \in \mathcal{A}$ : an action sampled from the offline dataset at state $s$
+    \item $D_s$ : empirical distribution of dataset actions observed at state $s$
+    \item $Q_\phi(s,a) \in \mathbb{R}$ : differentiable Q-network with parameters $\phi \in \mathbb{R}^d$
+    \item $V_\psi(s) \in \mathbb{R}$ : differentiable value network with parameters $\psi \in \mathbb{R}^k$
+\end{itemize}
+
+\vspace{6pt}
+
+Residual:
+\[
+\delta(s,a) = Q_\phi(s,a) - V_\psi(s).
+\]
+
+Indicator:
+\[
+\mathbf{1}(\delta < 0) =
+\begin{cases}
+1, & \delta < 0,\\
+0, & \delta \ge 0.
+\end{cases}
+\]
+
+\section*{Step 1 — Expectile Loss}
+
+The expectile regression loss is
+\[
+L_\tau(y,\mu)
+    = \bigl|\tau - \mathbf{1}(y < \mu)\bigr|\, (y-\mu)^2,
+    \qquad \tau \in (0,1).
+\]
+
+In offline RL:
+\[
+y = Q_\phi(s,a),\qquad \mu = V_\psi(s).
+\]
+
+Thus,
+\[
+L_\tau(Q_\phi(s,a),V_\psi(s))
+    = \bigl|\tau - \mathbf{1}(Q_\phi(s,a) < V_\psi(s))\bigr|\,
+      (Q_\phi(s,a) - V_\psi(s))^2.
+\]
+
+\[
+\mathbf{1 }\bigl(Q_\phi(s,a) < V_\psi(s)\bigr)
+=
+\begin{cases}
+1, & Q_\phi(s,a) < V_\psi(s),\\[6pt]
+0, & Q_\phi(s,a) \ge V_\psi(s).
+\end{cases}
+\]
+
+% ============================================================
+\subsection*{Case 1: $Q_\phi(s,a) > V_\psi(s)$ ($\delta>0$)}
+
+Indicator:
+\[
+\mathbf{1}(\delta<0)=0.
+\]
+
+Loss:
+\[
+L_\tau = \tau\,\delta^2.
+\]
+
+\[
+\boxed{
+L_\tau = \tau\,(Q_\phi(s,a)-V_\psi(s))^2
+}
+\]
+
+Gradient:
+\[
+\frac{\partial L_\tau}{\partial V_\psi(s)}
+    = \tau \cdot 2\, (V_\psi(s)-Q_\phi(s,a)) < 0.
+\]
+
+Thus:
+\[
+\boxed{
+V_\psi(s)\ \text{is pushed upward}.
+}
+\]
+
+% ============================================================
+\subsection*{Case 2: $Q_\phi(s,a) < V_\psi(s)$ ($\delta<0$)}
+
+Indicator:
+\[
+\mathbf{1}(\delta<0)=1.
+\]
+
+Loss:
+\[
+L_\tau = (1-\tau)\,\delta^2.
+\]
+
+\[
+\boxed{
+L_\tau = (1-\tau)\,(Q_\phi(s,a)-V_\psi(s))^2
+}
+\]
+
+Gradient:
+\[
+\frac{\partial L_\tau}{\partial V_\psi(s)}
+    = (1-\tau)\cdot 2\, (V_\psi(s)-Q_\phi(s,a)) > 0.
+\]
+
+Thus:
+\[
+\boxed{
+V_\psi(s)\ \text{is pushed downward}.
+}
+\]
+
+% ============================================================
+\subsection*{Case 3: $Q_\phi(s,a) = V_\psi(s)$ ($\delta=0$)}
+
+\[
+L_\tau = 0, \qquad
+\frac{\partial L_\tau}{\partial V_\psi(s)} = 0.
+\]
+
+\[
+\boxed{
+\text{No update.}
+}
+\]
+
+% ============================================================
+\section*{Summary Table}
+
+Let $\delta = Q_\phi(s,a) - V_\psi(s)$.
+
+\begin{center}
+\begin{tabular}{c|c|c|c|c|c}
+\textbf{Case} & \textbf{Condition} & \textbf{Indicator} &
+\textbf{Loss} & \textbf{Grad Sign} &
+\textbf{Effect on $V_\psi(s)$} \\
+\hline
+1 & $\delta>0$ & $0$ &
+$\tau\delta^2$ & $<0$ & $V_\psi(s)\uparrow$\\
+\hline
+2 & $\delta<0$ & $1$ &
+$(1-\tau)\delta^2$ & $>0$ & $V_\psi(s)\downarrow$\\
+\hline
+3 & $\delta=0$ & — &
+$0$ & $0$ & no change
+\end{tabular}
+\end{center}
+
+\section*{Interpretation}
+
+Upward weight $=\tau$, downward weight $=1-\tau$.  
+If $\tau>0.5$, upward corrections dominate, and $V_\psi(s)$ tracks the \emph{upper expectile} of the Q-values.
+
+\section*{Value Network Expectile Regression Objective}
+
+\[
+V_\psi(s)
+    = \arg\min_{v \in \mathbb{R}}
+      \mathbb{E}_{a \sim D_s}
+      \left[L_\tau(Q_\phi(s,a),v)\right].
+\]
+
+\newpage
+\pagebreak
+
+\section*{Implicit Q-Learning (IQL)}
+\section*{0. Notation (Short, Complete)}
+\[
+\mathcal{D}=\{(s_t,a_t,r_{t+1},s_{t+1})\}.
+\]
+\[
+\begin{aligned}
+&Q_\phi(s_t,a_t) &&\text{Q-network} \\
+&V_\psi(s_t) &&\text{Value network} \\
+&\pi_\theta(a_t\mid s_t) &&\text{Policy (discrete or continuous)} \\
+&D_{s_t}(a) &&\text{Empirical action distribution at } s_t \\
+&\delta_t = Q_\phi(s_t,a_t)-V_\psi(s_t) &&\text{Residual} \\
+&A_{\phi,\psi}(s_t,a_t)=\delta_t &&\text{Implicit advantage} \\
+&w(s_t,a_t)=\exp(A_{\phi,\psi}(s_t,a_t)/\beta) &&\text{Advantage weight} \\
+&L_\tau(y,\mu) &&\text{Expectile loss} \\
+&L_Q(\phi),\; L_V(\psi),\; J_{\text{actor}}(\theta) &&\text{Loss functions} \\
+&\tau\in(0,1),\;\beta>0,\;\gamma\in(0,1) &&\text{Hyperparameters}
+\end{aligned}
+\]
+TD target:
+\[
+y^{TD}_t = r_{t+1} + \gamma V_\psi(s_{t+1}).
+\]
+\section*{1. Value Function via Expectile Regression}
+\[
+L_\tau(y,\mu)=\left|\tau-\mathbf{1}(y<\mu)\right|(y-\mu)^2.
+\]
+\[
+L_\tau(Q_\phi(s_t,a_t),V_\psi(s_t))
+=
+\left|\tau-\mathbf{1}\left(Q_\phi(s_t,a_t)<V_\psi(s_t)\right)\right|
+\left(Q_\phi(s_t,a_t)-V_\psi(s_t)\right)^2.
+\]
+\[
+V_\psi(s_t)
+=
+\arg\min_{v\in\mathbb{R}}
+\mathbb{E}_{a\sim D_{s_t}}
+\left[L_\tau(Q_\phi(s_t,a),v)\right].
+\]
+\section*{2. Implicit Advantage}
+\[
+A_{\phi,\psi}(s_t,a_t)
+=
+Q_\phi(s_t,a_t)-V_\psi(s_t).
+\]
+\section*{3. Policy Models}
+\subsection*{Discrete (Softmax)}
+\[
+\pi_\theta(a_t\mid s_t)
+=
+\frac{\exp(f_\theta(s_t,a_t))}
+{\sum_{a'\in\mathcal{A}}\exp(f_\theta(s_t,a'))}.
+\]
+\subsection*{Continuous (Gaussian)}
+\[
+\pi_\theta(a_t\mid s_t)
+=
+\mathcal{N}\!\left(a_t \mid \mu_\theta(s_t),\Sigma_\theta(s_t)\right).
+\]
+\section*{4. Advantage-Weighted Actor Learning}
+\[
+w(s_t,a_t)=\exp\!\left(\frac{A_{\phi,\psi}(s_t,a_t)}{\beta}\right).
+\]
+\[
+J_{\text{actor}}(\theta)
+=
+\mathbb{E}_{(s_t,a_t)\sim\mathcal{D}}
+\left[w(s_t,a_t)\log\pi_\theta(a_t\mid s_t)\right].
+\]
+\section*{5. Q-Function Learning}
+\[
+y^{TD}_t=r_{t+1}+\gamma V_\psi(s_{t+1}).
+\]
+\[
+L_Q(\phi)=
+\mathbb{E}\left[
+\left(Q_\phi(s_t,a_t)-y^{TD}_t\right)^2
+\right].
+\]
+\section*{6. Parameter Updates}
+\[
+\phi \leftarrow \phi - \eta_\phi \nabla_\phi L_Q(\phi),
+\]
+\[
+\psi \leftarrow \psi - \eta_\psi
+\nabla_\psi
+\mathbb{E}_{a\sim D_{s_t}}
+\left[L_\tau(Q_\phi(s_t,a),V_\psi(s_t))\right],
+\]
+\[
+\theta \leftarrow 
+\theta + \eta_\theta
+\nabla_\theta J_{\text{actor}}(\theta).
+\]
+\section*{7. Compact Objective Summary}
+\[
+\boxed{
+\begin{aligned}
+&L_Q(\phi)=
+\mathbb{E}\!\left[
+\left(Q_\phi(s_t,a_t)-\left(r_{t+1}+\gamma V_\psi(s_{t+1})\right)\right)^2
+\right]
+\\[6pt]
+&L_V(\psi)=
+\mathbb{E}\!\left[
+\left|\tau-\mathbf{1}\left(Q_\phi(s_t,a_t)<V_\psi(s_t)\right)\right|
+\left(Q_\phi(s_t,a_t)-V_\psi(s_t)\right)^2
+\right]
+\\[6pt]
+&J_{\text{actor}}(\theta)=
+\mathbb{E}\!\left[
+\exp\!\left(\frac{Q_\phi(s_t,a_t)-V_\psi(s_t)}{\beta}\right)
+\log\pi_\theta(a_t\mid s_t)
+\right]
+\end{aligned}}
+\]
+\section*{8. Short Explanation}
+IQL is an offline RL method where:
+\subsection*{1. The value function is fitted using expectile regression}
+\[
+V_\psi(s_t)
+=
+\arg\min_{v}
+\mathbb{E}_{a\sim D_{s_t}}
+\left[
+\left|\tau-\mathbf{1}\left(Q_\phi(s_t,a)<v\right)\right|
+\left(Q_\phi(s_t,a)-v\right)^2
+\right].
+\]
+\subsection*{2. The Q-function is fitted using TD(0)}
+\[
+L_Q(\phi)=
+\mathbb{E}\left[
+\left(Q_\phi(s_t,a_t)-(r_{t+1}+\gamma V_\psi(s_{t+1}))\right)^2
+\right].
+\]
+\subsection*{3. The policy is learned by advantage-weighted imitation}
+\[
+J_{\text{actor}}(\theta)=
+\mathbb{E}\left[
+\exp\!\left(\frac{Q_\phi(s_t,a_t)-V_\psi(s_t)}{\beta}\right)
+\log\pi_\theta(a_t\mid s_t)
+\right].
+\]
+\subsection*{4. All expectations are over dataset actions only}
+\[
+(s_t,a_t)\sim\mathcal{D}, \qquad a\sim D_{s_t}.
+\]
+Thus,
+\[
+\text{IQL avoids OOD error because the value network is fitted only on dataset actions}.
+\]
+
+\begin{algorithm}[H]
+\caption{Implicit Q-Learning (IQL)}
+\begin{algorithmic}[1]
+
+\State \textbf{Input:} Offline dataset $\mathcal{D}=\{(s_t,a_t,r_{t+1},s_{t+1})\}$
+
+\State \textbf{Initialize:} 
+Q-network $Q_\phi$, 
+value network $V_\psi$, 
+policy $\pi_\theta$,
+learning rates $\eta_\phi,\,\eta_\psi,\,\eta_\theta$,
+discount $\gamma$,
+expectile $\tau$,
+actor temperature $\beta$.
+
+\While{training}
+
+    \State Sample minibatch $B$ from $\mathcal{D}$.
+
+    \ForAll{$(s_t,a_t,r_{t+1},s_{t+1}) \in B$}
+
+        \State \textbf{// TD(0) target}
+        \State $y^{TD}_t = r_{t+1} + \gamma\, V_\psi(s_{t+1})$
+
+        \State \textbf{// Q-function loss}
+        \State $L_Q = (Q_\phi(s_t,a_t) - y^{TD}_t)^2$
+
+        \State \textbf{// Expectile value loss}
+        \State Compute residual: $\delta_t = Q_\phi(s_t,a_t) - V_\psi(s_t)$
+        \State Compute weight: $u_t = |\tau - \mathbf{1}(\delta_t < 0)|$
+        \State $L_V = u_t \cdot \delta_t^2$
+
+        \State \textbf{// Implicit advantage}
+        \State $A_t = Q_\phi(s_t,a_t) - V_\psi(s_t)$
+
+        \State \textbf{// Advantage weight}
+        \State $w_t = \exp(A_t / \beta)$
+
+        \State \textbf{// Actor loss (advantage-weighted)}
+        \State $L_{\text{actor}} = - w_t \cdot \log \pi_\theta(a_t \mid s_t)$
+
+    \EndFor
+
+    \State \textbf{// Update networks}
+    \State $\phi \gets \phi - \eta_\phi \nabla_\phi L_Q$
+    \State $\psi \gets \psi - \eta_\psi \nabla_\psi L_V$
+    \State $\theta \gets \theta - \eta_\theta \nabla_\theta L_{\text{actor}}$
+
+\EndWhile
+
+\end{algorithmic}
+\end{algorithm}
 
 
-##########################################################################
+\newpage
+\pagebreak
 
-The Goal: Build an AI Risk Manager
-The fundamental goal of this code is to train an AI agent that acts like an expert financial risk manager for a petrochemical plant. This AI agent learns to make two critical, interconnected decisions every single day:
+\section*{Conservative Q-Learning (CQL)}
 
-Hedging (Financial Decision): What percentage of the required raw materials (naphtha, natural gas) should we lock in at a future price to protect against price spikes?
+\section*{0. Notation (Short and Complete)}
 
-Portfolio (Operational Decision): How should we allocate the plant's production capacity between our two products (Ethylene and Polypropylene) to maximize profit margins?
+\[
+\mathcal{D}=\{(s_t,a_t,r_{t+1},s_{t+1},d_{t+1})\}.
+\]
 
-The agent's objective is not just to maximize profit, but to do so while minimizing the volatility and downside risk of that profit.
+\[
+\begin{aligned}
+&Q_{\phi_1}(s,a),\,Q_{\phi_2}(s,a)
+&&\text{Twin Q-networks (SAC-style)},\\
+&Q_{\phi^-_1}(s,a),\,Q_{\phi^-_2}(s,a)
+&&\text{Target twin Q-networks (Polyak averaged)},\\
+&\pi_\theta(a\mid s)
+&&\text{Stochastic policy (Gaussian for continuous; categorical for discrete)},\\
+&\mathcal{A}
+&&\text{Action space (finite or continuous)},\\
+&\gamma\in(0,1)
+&&\text{Discount factor},\\
+&d_{t+1}\in\{0,1\}
+&&\text{Terminal flag},\\
+&\alpha>0
+&&\text{CQL regularization weight},\\
+&\alpha_{\text{ent}}>0
+&&\text{Entropy temperature (for policy)},\\
+&L_{\text{Bellman}}, L_{\text{CQL}}, L_{\text{total}}
+&&\text{Loss terms}.
+\end{aligned}
+\]
 
-The Workflow: From Blueprint to Final Report
-The process can be broken down into three main phases:
+\section*{1. Bellman Regression (Twin Critic Form)}
 
-Phase 1: Inputs & World Generation
-The entire process starts with one key input:
+\subsection*{TD(0) Target (SAC-Style)}
 
-Input: The problem_config_risk_rl.json file. This is the master blueprint. It defines the plant's physical and economic rules (e.g., production costs, capacity), the assumptions about market behavior (e.g., price volatility), and the parameters for the AI agent itself.
+\[
+y^{TD}_t
+=
+r_{t+1}
++
+\gamma (1-d_{t+1})
+\left[
+\min_{i=1,2}
+Q_{\phi^-_i}(s_{t+1}, a'_{t+1})
+-
+\alpha_{\text{ent}} \log \pi_\theta(a'_{t+1} \mid s_{t+1})
+\right],
+\]
+\[
+a'_{t+1} \sim \pi_\theta(\cdot \mid s_{t+1}).
+\]
 
-Using this blueprint, the data_generator_risk.py script first creates a simulated world for the AI to learn in and be tested against. It generates two crucial datasets:
+\subsection*{Twin Critic Bellman Error}
 
-A Training History: A single, very long historical timeline (e.g., 20 years of daily market prices). This acts as a "textbook" from which the AI will learn.
+\[
+L_{\text{Bellman}}
+=
+\sum_{i=1}^2\;
+\mathbb{E}_{(s_t,a_t)\sim\mathcal{D}}
+\left[
+\left(
+Q_{\phi_i}(s_t,a_t)-y^{TD}_t
+\right)^2
+\right].
+\]
 
-Monte Carlo Scenarios: Thousands of different, plausible "what-if" future scenarios (e.g., 1,000 different versions of the next 180 days). This is the "final exam" used to rigorously test the AI's performance.
+\section*{2. Conservative Penalty (Core of CQL)}
 
-##########################################################################
+CQL modifies only one critic, typically $Q_{\phi_1}$, to push down Q-values for OOD actions and increase Q-values for dataset actions.
 
-Phase 2: The Learning Phase (Training the PPO Agent)
-This is the core of the Reinforcement Learning process, orchestrated by main_risk_rl.py:
+\subsection*{2.1 Discrete Action Spaces}
 
-Create a Virtual Plant: The code defines a simulation environment (PetrochemicalPlantEnv) that acts as a digital twin of the real plant. The AI agent lives and makes decisions within this virtual world.
+\[
+L_{\text{CQL}}^{\text{disc}}
+=
+\mathbb{E}_{s_t\sim\mathcal{D}}
+\left[
+\log
+\sum_{a \in \mathcal{A}}
+\exp(Q_{\phi_1}(s_t,a))
+-
+Q_{\phi_1}(s_t,a_t)
+\right].
+\]
 
-Define the Rules of the Game: The agent's goal is to maximize a risk-adjusted reward. It gets points for high daily profit but loses points if its profits are unstable and volatile. This crucial rule forces the agent to learn conservative, stable strategies, not just "get rich quick" schemes.
+\subsection*{2.2 Continuous Action Spaces}
 
-The Training Loop: The agent undergoes thousands of training "episodes." In each episode (a simulated 128-day period):
+\[
+a^{(i)} \sim q(a \mid s_t),
+\]
 
-Observe: The agent looks at the recent market conditions (price trends, volatility, etc.).
+\[
+q(a\mid s)
+= 
+\lambda_1 q_{\text{uniform}}(a)
++ 
+\lambda_2 q_{\text{random}}(a)
++
+\lambda_3 \pi_\theta(a \mid s),
+\qquad
+\sum \lambda_i = 1,\;
+\lambda_i \ge 0.
+\]
 
-Decide: Based on its observations, its neural network "brain" decides on the best action: a precise mix of hedging percentages and production allocation.
+\[
+L_{\text{CQL}}^{\text{cont}}
+=
+\mathbb{E}_{s_t\sim\mathcal{D}}
+\left[
+\log
+\left(
+\frac{1}{M}
+\sum_{i=1}^{M}
+\frac{\exp(Q_{\phi_1}(s_t,a^{(i)}))}{q(a^{(i)}\mid s_t)}
+\right)
+-
+Q_{\phi_1}(s_t,a_t)
+\right].
+\]
 
-Act & Experience: The virtual plant executes the decision, and the environment calculates the resulting daily profit and the risk-adjusted reward.
+\subsection*{Simplified Practical Form}
 
-Learn: The agent's brain is updated via the PPO algorithm. It learns which actions led to good, stable outcomes and which led to poor or risky ones, gradually becoming smarter over time.
+\[
+L_{\text{CQL}}^{\text{cont-simple}}
+=
+\mathbb{E}_{s_t\sim\mathcal{D}}
+\left[
+\log
+\left(
+\frac{1}{M}
+\sum_{i=1}^{M}
+\exp(Q_{\phi_1}(s_t,a^{(i)}))
+\right)
+-
+Q_{\phi_1}(s_t,a_t)
+\right].
+\]
 
-The output of this phase is a set of trained model files (.pth and .joblib) that represent the "brain" of the expert AI risk manager.
+\section*{3. Full CQL Critic Objective}
 
-##########################################################################
+\[
+L_{\text{total}}
+=
+L_{\text{Bellman}}
++
+\alpha L_{\text{CQL}},
+\]
 
-Phase 3: The Final Exam (Benchmarking and Evaluation)
-Once the agent is trained, its true value must be proven.
+\[
+L_{\text{CQL}} =
+\begin{cases}
+L_{\text{CQL}}^{\text{disc}}, & \text{if discrete},\\[4pt]
+L_{\text{CQL}}^{\text{cont-simple}} \text{ or } L_{\text{CQL}}^{\text{cont}}, & \text{if continuous}.
+\end{cases}
+\]
 
-Assemble the Contestants: The system loads the newly trained PPO Agent and two simpler Baseline Agents for comparison:
+\[
+Q(s,a_{\text{OOD}}) \text{ decreases},
+\qquad
+Q(s,a_{t}) \text{ increases}.
+\]
 
-StaticStrategyAgent: A naive agent that uses the same fixed hedging and production mix every single day, regardless of market conditions.
+\section*{4. Policy Learning (Optional: CQL-SAC)}
 
-HeuristicAgent: A smarter, rule-based agent that adjusts its production based on recent profit margins but still uses fixed hedging.
+\[
+J_{\text{actor}}(\theta)
+=
+\mathbb{E}_{s_t\sim\mathcal{D},\, a\sim\pi_\theta(\cdot\mid s_t)}
+\left[
+\alpha_{\text{ent}}\log\pi_\theta(a\mid s_t)
+-
+Q_{\phi_1}(s_t,a)
+\right].
+\]
 
-Run the Monte Carlo Simulation: All three agents are run through the 1,000 "what-if" future scenarios. For each possible future, the code calculates the total profit each agent would have generated over 180 days.
+\[
+\pi_\theta^*
+=
+\arg\min_{\pi_\theta}
+\mathrm{KL}
+\left(
+\pi_\theta(\cdot\mid s)
+\;\Big\|\;
+\frac{\exp(Q_{\phi_1}(s,a)/\alpha_{\text{ent}})}{Z(s)}
+\right),
+\]
 
-Analyze the Results: By comparing the performance across all 1,000 scenarios, the system can robustly measure not just the average performance but also the risk profile of each strategy.
+\[
+Z(s)=\int_{\mathcal{A}}\exp\left(Q_{\phi_1}(s,a)/\alpha_{\text{ent}}\right) da.
+\]
 
-The Final Output: An Actionable Report
-The final output of the entire program is a summary table printed to the console. This table is the key deliverable for a human decision-maker, showing:
+\section*{5. Parameter Updates}
 
-Strategy	Avg Profit ($M)	Profit Std Dev ($M)	Value at Risk (5%) ($M)
-StaticStrategyAgent	25.15	8.50	10.90
-HeuristicAgent	32.40	7.80	19.50
-PPOAgent	34.50	4.20	27.80
-This table provides a clear, data-driven conclusion. A manager can see that the PPO Agent is superior because it generates the highest average profit while simultaneously having the lowest risk (lowest standard deviation) and the best worst-case outcome (highest Value at Risk).
+\[
+\phi_i \leftarrow \phi_i - \eta_\phi \nabla_{\phi_i} L_{\text{total}}, 
+\qquad i = 1,2.
+\]
 
-##########################################################################
+\[
+\theta \leftarrow \theta - \eta_\theta \nabla_\theta J_{\text{actor}}.
+\]
+
+\[
+\phi^-_i \leftarrow \tau\,\phi_i + (1-\tau)\phi^-_i,
+\qquad i = 1,2.
+\]
+
+\section*{6. Compact Objective Summary}
+
+\[
+\boxed{
+\begin{aligned}
+&\textbf{Bellman Loss:}\quad
+L_{\text{Bellman}}
+=
+\sum_{i=1}^2
+\mathbb{E}
+\left[
+(Q_{\phi_i}(s_t,a_t)-y^{TD}_t)^2
+\right],
+\\[6pt]
+&\textbf{CQL Loss (disc):}\quad
+L_{\text{CQL}}
+=
+\mathbb{E}
+\left[
+\log\sum_a \exp(Q_{\phi_1}(s_t,a))
+-
+Q_{\phi_1}(s_t,a_t)
+\right],
+\\[6pt]
+&\textbf{CQL Loss (cont):}\quad
+L_{\text{CQL}}
+=
+\mathbb{E}
+\left[
+\log \tfrac{1}{M}\sum_i \exp(Q_{\phi_1}(s_t,a^{(i)}))
+-
+Q_{\phi_1}(s_t,a_t)
+\right],
+\\[6pt]
+&\textbf{Total Loss:}\quad
+L_{\text{total}}
+=
+L_{\text{Bellman}}
++
+\alpha L_{\text{CQL}},
+\\[6pt]
+&\textbf{Actor Loss (CQL-SAC):}\quad
+J_{\text{actor}}
+=
+\mathbb{E}
+\left[
+\alpha_{\text{ent}}\log\pi_\theta(a\mid s_t)
+-
+Q_{\phi_1}(s_t,a)
+\right].
+\end{aligned}}
+\]
+
+
+\begin{algorithm}[H]
+\caption{Conservative Q-Learning (CQL)}
+\begin{algorithmic}[1]
+
+\State \textbf{Input:} Offline dataset $\mathcal{D}=\{(s_t,a_t,r_{t+1},s_{t+1},d_{t+1})\}$
+\State \textbf{Initialize:} Q-networks $Q_{\phi_1}, Q_{\phi_2}$; target networks $Q_{\phi^-_1}, Q_{\phi^-_2}$; 
+policy $\pi_\theta$ (optional); sampler $q(a\mid s)$;
+learning rates $\eta_\phi, \eta_\theta$; discount $\gamma$; CQL weight $\alpha$; entropy temperature $\alpha_{\text{ent}}$.
+
+\While{training}
+
+    \State Sample minibatch $B$ from $\mathcal{D}$.
+
+    \ForAll{$(s_t,a_t,r_{t+1},s_{t+1},d_{t+1}) \in B$}
+
+        \State Sample next action $a'_{t+1} \sim \pi_\theta(\cdot\mid s_{t+1})$
+
+        \State \textbf{// SAC TD target}
+        \State $y^{TD}_t = r_{t+1} + \gamma (1-d_{t+1}) \left( \min(Q_{\phi^-_1}(s_{t+1},a'_{t+1}),\, Q_{\phi^-_2}(s_{t+1},a'_{t+1})) - \alpha_{\text{ent}}\log\pi_\theta(a'_{t+1}\mid s_{t+1}) \right)$
+
+        \State \textbf{// Bellman critic loss}
+        \State $L_{\text{Bellman}} = (Q_{\phi_1}(s_t,a_t)-y^{TD}_t)^2 + (Q_{\phi_2}(s_t,a_t)-y^{TD}_t)^2$
+
+        \State \textbf{// CQL penalty}
+        \If{discrete action space}
+            \State $L_{\text{CQL}} = \log\left( \sum_{a\in\mathcal{A}} \exp(Q_{\phi_1}(s_t,a)) \right) - Q_{\phi_1}(s_t,a_t)$
+        \Else
+            \State Sample $M$ actions $a^{(i)} \sim q(a\mid s_t)$
+            \State $L_{\text{CQL}} = \log\left( \frac{1}{M}\sum_{i=1}^{M} \exp(Q_{\phi_1}(s_t,a^{(i)})) \right) - Q_{\phi_1}(s_t,a_t)$
+        \EndIf
+
+        \State $L_{\text{total}} = L_{\text{Bellman}} + \alpha\,L_{\text{CQL}}$
+
+    \EndFor
+
+    \State \textbf{// Update critics}
+    \State $\phi_i \gets \phi_i - \eta_\phi \nabla_{\phi_i} L_{\text{total}}$ \quad for $i=1,2$
+
+    \If{policy learning enabled}
+        \State \textbf{// Actor update}
+        \State $J_{\text{actor}} = \mathbb{E}_{s\sim\mathcal{D},\,a\sim \pi_\theta} \left[ \alpha_{\text{ent}}\log\pi_\theta(a\mid s) - Q_{\phi_1}(s,a) \right]$
+        \State $\theta \gets \theta - \eta_\theta \nabla_\theta J_{\text{actor}}$
+    \EndIf
+
+    \State \textbf{// Polyak averaging}
+    \State $\phi^-_i \gets \tau\,\phi_i + (1-\tau)\phi^-_i$ \quad for $i=1,2$
+
+\EndWhile
+
+\end{algorithmic}
+\end{algorithm}
 
 
 
-f course. Let's peel back the layers and dive into the more detailed, nuanced insights that this project provides. Moving beyond the high-level summary, we can analyze the why and how of the agent's behavior and the implications for real-world decision-making.
+\newpage
+\pagebreak
 
-##########################################################################
 
-Insight 1: The Agent Discovers the "Shape" of Risk-Return Tradeoffs
-The final benchmark table shows what the PPO agent achieves, but the training process reveals how. The agent isn't just maximizing profit; it's navigating a complex, multi-dimensional risk-return landscape.
+\section*{Batched Constrained Q-Learning (BCQL)}
 
-Hedging is Insurance, Not a Profit Center: During training, the agent learns that aggressive hedging (e.g., 100%) often lowers the average profit. This is because futures markets typically have a small premium (contango). However, it also learns that zero hedging exposes the plant to catastrophic losses during price shocks. The agent's learned policy—often settling on hedging ratios between 60-85%—represents the optimal tradeoff point. It's effectively buying just the right amount of "profit insurance," sacrificing a little bit of upside to cut off the disastrous downside tail of the risk distribution. This is something human traders spend careers trying to master.
+\section*{0. Notation (Short, Complete)}
 
-Dynamic Portfolio is an "Alpha" Generator: The agent learns that dynamically shifting production is a powerful tool for enhancing returns. When the price of polypropylene spikes relative to ethylene, the agent will aggressively shift production to polypropylene. This operational flexibility is a source of "alpha" (excess returns) that the static agent cannot capture. The PPO agent learns to be more sensitive and faster in its response to these margin shifts than the simple HeuristicAgent, which uses a backward-looking average.
+\[
+\mathcal{D}=\{(s_t,a_t,r_{t+1},s_{t+1})\}.
+\]
 
-##########################################################################
+\[
+\begin{aligned}
+&Q_\phi(s,a) &&\text{Q-network with parameters }\phi,\\
+&\mathcal{A}_{\mathcal{D}}(s) &&\text{Dataset-supported actions at state } s, \\
+&\mathcal{A} &&\text{Action space (finite)},\\
+&\gamma\in(0,1) &&\text{Discount factor},\\
+&L_Q(\phi) &&\text{BCQL loss},\\
+&y^{BCQL}_t &&\text{BCQL TD target}.
+\end{aligned}
+\]
 
-Insight 2: The PPO Agent's Strategy is Emergent and State-Dependent
-A static or simple heuristic agent applies the same logic everywhere. The PPO agent's strategy is far richer; its decisions are contingent on the market state. We could analyze its behavior and find patterns like:
+\[
+\mathcal{A}_{\mathcal{D}}(s)
+=
+\{\,a \mid (s,a) \text{ appears in the dataset}\,\}.
+\]
 
-Volatility-Contingent Hedging: The agent will likely learn to increase its hedge ratios when market volatility is high. The feature naphtha_price_win30_std (the 30-day standard deviation of Naphtha prices) becomes a key input. When this value is high, the reward function's volatility penalty becomes more severe, pushing the agent to adopt a more conservative, heavily-hedged posture. When markets are calm, it might slightly reduce its hedges to capture more upside.
+\section*{1. Bellman Target (Constrained Maximization)}
 
-Trend-Following Production: The agent will likely pay close attention to the trend features (e.g., ethylene_price_win30_trend). If it sees a strong upward price trend for one product and a flat or downward trend for the other, it will preemptively shift production, anticipating that the margin for the trending product will continue to improve. This is more sophisticated than the heuristic agent, which only reacts to past average margins.
+\[
+y^{BCQL}_t
+=
+r_{t+1}
++
+\gamma
+\max_{a' \in \mathcal{A}_{\mathcal{D}}(s_{t+1})}
+Q_\phi(s_{t+1},a').
+\]
 
-Inter-Commodity Spreads: The agent's neural network implicitly learns the relationship between commodity prices. It learns that the "spread" (the price difference) between Ethylene and Naphtha is the key driver of the Ethylene margin. Its decisions are not based on absolute price levels but on these crucial relative values, something a human analyst would do.
+\subsection*{Key principle:}
 
-##########################################################################
+\[
+\max_{a'\in\mathcal{A}}
+\quad\Longrightarrow\quad
+\max_{a'\in\mathcal{A}_{\mathcal{D}}(s)}.
+\]
 
-Insight 3: Quantifying the Value of Flexibility and Intelligence
-This simulation framework acts as a powerful business case tool. The final benchmark table isn't just a scorecard; it's a financial justification.
+\section*{2. BCQL Loss}
 
-The Value of Dynamic Portfolio Management: The difference in "Avg Profit" between the StaticStrategyAgent and the HeuristicAgent (e.g., $32.40M - $25.15M = $7.25M) quantifies the value of having the operational flexibility to change the production mix. This number could be used to justify investments in plant retrofits that enable faster product switching.
+\[
+L_Q(\phi)
+=
+\mathbb{E}_{(s_t,a_t,r_{t+1},s_{t+1})\sim\mathcal{D}}
+\left[
+\left(
+Q_\phi(s_t,a_t)
+-
+y^{BCQL}_t
+\right)^2
+\right].
+\]
 
-The Value of Integrated Risk Management (The PPO Agent's Edge): The PPO agent outperforms the HeuristicAgent not just on profit but significantly on risk (lower Std Dev, higher VaR). The performance gap between these two agents quantifies the value of a sophisticated, integrated strategy. The PPO agent understands that hedging and portfolio decisions are not independent. For example, if it decides to produce more Ethylene (which uses more Naphtha), it simultaneously knows it needs to adjust its Naphtha hedge. This integrated decision-making is what reduces profit volatility and prevents "uncovered" exposures.
+\section*{3. Dataset-Supported Action Set}
 
-##########################################################################
+For discrete action spaces:
 
-Insight 4: "Profit at Risk" (PaR) as a Superior Metric for Managers
-While "Value at Risk" (VaR) is a standard financial metric, "Profit at Risk" (PaR), which we calculate as (Avg Profit - VaR), is often more intuitive for industrial operations managers.
+\[
+\mathcal{A}_{\mathcal{D}}(s)
+=
+\{a\in\mathcal{A}\mid (s,a)\in\mathcal{D}\}.
+\]
 
-VaR: "In our worst 5% of futures, we expect to make a profit of at least $27.80M." (A statement about the floor).
+If a state $s$ appears $K$ times in the dataset with actions
+\[
+a^{(1)},a^{(2)},\dots,a^{(K)},
+\]
+then
+\[
+\mathcal{A}_{\mathcal{D}}(s)=\{a^{(1)},\dots,a^{(K)}\}.
+\]
 
-PaR: "The potential profit shortfall we face between an average future and a bad future is about $7M." (A statement about the magnitude of the drop).
+\section*{4. Comparison to Standard Q-Learning}
 
-Looking at the PaR across the strategies shows how much "pain" each strategy can cause. The PPO agent's low PaR demonstrates its robustness and resilience. It doesn't just raise the average; it significantly pads the downside, making the business more predictable and stable, which is highly valued by investors and corporate leadership.
+Standard Q-learning target:
+\[
+y^{QL}_t = r_{t+1}+\gamma\max_{a'\in\mathcal{A}}Q(s_{t+1},a').
+\]
 
-##########################################################################
+BCQL target:
+\[
+y^{BCQL}_t = r_{t+1}+\gamma\max_{a'\in\mathcal{A}_{\mathcal{D}}(s_{t+1})}Q(s_{t+1},a').
+\]
 
-Insight 5: The System as a "Digital Sandbox" for Strategy Exploration
-This codebase is more than just a tool for training one agent. It's a strategic "sandbox" for executive-level what-if analysis. By changing the problem_config_risk_rl.json file, one could easily explore deep strategic questions without risking real capital:
+\[
+\text{BCQL is a constrained variant of Q-learning.}
+\]
 
-Impact of New Market Regimes: What if energy prices become permanently more volatile? (Increase natural_gas_price volatility in the config and re-run the benchmark to see which strategy holds up best).
+\section*{5. Parameter Update}
 
-Evaluating Capital Projects: An engineer proposes a project that increases the total_plant_capacity_ton_day by 10% but also increases fixed_costs_per_day. Will this investment pay off under market uncertainty? ("Install" the upgrade in the config file and see if the PPO agent can leverage the new capacity to generate enough extra risk-adjusted profit to justify the cost).
+\[
+\phi \leftarrow \phi - \eta_\phi \nabla_\phi L_Q(\phi).
+\]
 
-Setting Risk Mandates: The board of directors mandates that the 5% VaR must not fall below $20M. You can tune the risk_aversion_lambda in the PPO agent's config until its resulting VaR meets this policy constraint, effectively translating a high-level business rule into an optimal, operational AI policy.
+\section*{6. Compact Objective Summary}
 
-##########################################################################
+\[
+\boxed{
+\begin{aligned}
+&\mathcal{A}_{\mathcal{D}}(s)
+=
+\{a\mid (s,a)\in\mathcal{D}\},
+\\[6pt]
+&y^{BCQL}_t
+=
+r_{t+1}
++
+\gamma
+\max_{a'\in\mathcal{A}_{\mathcal{D}}(s_{t+1})}
+Q_\phi(s_{t+1},a'),
+\\[6pt]
+&L_Q(\phi)
+=
+\mathbb{E}
+\left[
+\left(
+Q_\phi(s_t,a_t)
+-
+y^{BCQL}_t
+\right)^2
+\right].
+\end{aligned}}
+\]
+
+\section*{7. Short Explanation}
+
+\subsection*{1. Offline Q-learning usually uses}
+\[
+\max_{a'} Q(s,a').
+\]
+
+\subsection*{2. BCQL restricts the backup to dataset actions only}
+\[
+a'\in\mathcal{A}_{\mathcal{D}}(s_{t+1}),
+\]
+so no extrapolation error occurs.
+
+\subsection*{3. BCQL is a conservative offline RL method}
+It never evaluates Q-values of unseen actions, which makes it stable but overly conservative.
+
+\begin{algorithm}[H]
+\caption{Batched Constrained Q-Learning (BCQL)}
+\begin{algorithmic}[1]
+
+\State \textbf{Input:} Offline dataset $\mathcal{D}=\{(s_t,a_t,r_{t+1},s_{t+1})\}$
+\State \textbf{Initialize:} Q-network $Q_\phi$, learning rate $\eta_\phi$, discount $\gamma$
+
+\While{training}
+
+    \State Sample minibatch $B$ from $\mathcal{D}$
+
+    \ForAll{$(s_t,a_t,r_{t+1},s_{t+1}) \in B$}
+
+        \State \textbf{// Identify dataset-supported actions at $s_{t+1}$}
+        \[
+        \mathcal{A}_{\mathcal{D}}(s_{t+1})
+        =
+        \{\, a' \mid (s_{t+1},a') \in \mathcal{D} \,\}
+        \]
+
+        \State \textbf{// BCQL TD target}
+        \[
+        y^{BCQL}_t
+        =
+        r_{t+1}
+        +
+        \gamma
+        \max_{a' \in \mathcal{A}_{\mathcal{D}}(s_{t+1})}
+        Q_\phi(s_{t+1},a')
+        \]
+
+        \State \textbf{// Bellman error}
+        \[
+        L_Q
+        =
+        \left(
+        Q_\phi(s_t,a_t)
+        -
+        y^{BCQL}_t
+        \right)^2
+        \]
+
+    \EndFor
+
+    \State \textbf{// Gradient step}
+    \[
+    \phi \leftarrow \phi - \eta_\phi \nabla_\phi L_Q
+    \]
+
+\EndWhile
+
+\end{algorithmic}
+\end{algorithm}
+
+\newpage
+\pagebreak
