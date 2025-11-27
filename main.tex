@@ -1,0 +1,2108 @@
+\documentclass[9pt]{article}
+\usepackage{graphicx} % Required for inserting images
+
+\title{RLBasics}
+\author{sagarsrinivastcs }
+\date{October 2025}
+\usepackage{amsmath, amssymb}
+\usepackage{algorithm}    % Algorithm environment
+\usepackage{algpseudocode}% Pseudocode environment for algorithms
+\usepackage{mdframed}
+
+\begin{document}
+
+\begin{flushleft}
+\section*{What Is Model-Based Reinforcement Learning (MBRL)?}
+
+Model-based reinforcement learning (MBRL) is a family of RL methods where the agent learns an \emph{explicit} model of the environment's dynamics and uses that model for planning or improving its policy, rather than relying solely on trial-and-error interaction as in model-free RL.
+
+\section{Core Idea}
+
+In a Markov Decision Process (MDP), the environment is defined by:
+
+\begin{itemize}
+    \item \textbf{State transition dynamics}
+    \[
+        p(s_{t+1} \mid s_t, a_t)
+    \]
+    \item \textbf{Reward function}
+    \[
+        r(s_t, a_t)
+    \]
+\end{itemize}
+
+Model-based RL tries to learn approximations
+\[
+\hat{p}_\theta(s_{t+1} \mid s_t, a_t), 
+\qquad 
+\hat{r}_\phi(s_t, a_t),
+\]
+from data, and then uses them for planning or policy learning.  
+Model-free RL skips this step and directly learns a policy or Q-function.
+
+\section{The Three Pillars of Model-Based RL}
+
+\subsection{Learning the Model}
+
+You learn predictive functions from collected transitions:
+\[
+(s_t, a_t, r_{t+1}, s_{t+1}) \sim \mathcal{D}.
+\]
+
+\begin{itemize}
+    \item \textbf{Forward dynamics model} (predicts next state)
+    \[
+        \hat{s}_{t+1} = f_\theta(s_t, a_t)
+    \]
+    \item \textbf{Reward model} (predicts reward)
+    \[
+        \hat{r}_{t+1} = g_\phi(s_t, a_t)
+    \]
+    \item \textbf{Terminal/done predictor} (optional)
+    \[
+        \hat{d}_{t+1} = h_\psi(s_t, a_t)
+    \]
+\end{itemize}
+
+\subsection{Planning Using the Model}
+
+Use the learned model to simulate future trajectories.  
+Standard choices include:
+
+\begin{itemize}
+    \item \textbf{MPC (Model Predictive Control)}  
+    Roll out candidate action sequences through the model and choose the best via an optimizer (e.g., CEM, MPPI).
+
+    \item \textbf{Value expansion}  
+    Use short model rollouts combined with bootstrapping (e.g., STEVE in MBPO).
+
+    \item \textbf{Policy optimization inside model rollouts}  
+    Update the policy using trajectories imagined from the learned model.
+\end{itemize}
+
+\subsection{Improving the Policy}
+
+Using simulated rollouts, you may:
+\begin{itemize}
+    \item update Q-functions,
+    \item update policy gradients,
+    \item reduce sample complexity,
+    \item reduce unsafe exploration.
+\end{itemize}
+
+A typical policy update:
+\[
+\theta \leftarrow 
+\theta 
+- 
+\eta \nabla_\theta 
+\mathbb{E}_{\hat{\tau} \sim \hat{p}} 
+\left[
+    \sum_t r(s_t, a_t)
+\right].
+\]
+\end{flushleft}
+
+\newpage
+\pagebreak
+
+
+\begin{flushleft}
+\section{PETS: Probabilistic Ensembles with Trajectory Sampling}
+
+We consider a continuous-state, continuous-action MDP
+\[
+\mathcal{M} = (\mathcal{S},\mathcal{A},p,r,\gamma),
+\]
+where the dynamics $p(s_{t+1}\mid s_t,a_t)$ are unknown and must be learned.
+
+\subsection{Notation}
+\begin{itemize}
+    \item $s_t \in \mathcal{S} \subseteq \mathbb{R}^{d_s}$: state at time $t$.
+    \item $a_t \in \mathcal{A} \subseteq \mathbb{R}^{d_a}$: action at time $t$.
+    \item $r(s_t,a_t)$: deterministic reward.
+    \item $H$: MPC planning horizon.
+    \item $B$: number of models in the ensemble.
+    \item $N$: number of particles used for trajectory prediction.
+    \item $K$: number of candidate action sequences sampled per CEM iteration.
+    \item $K_{\mathrm{elite}}$: number of top candidates retained.
+    \item $J$: number of CEM iterations.
+    \item $\alpha \in [0,1]$: smoothing coefficient for CEM parameter updates.
+\end{itemize}
+
+\section{Probabilistic Ensemble Dynamics}
+PETS learns an ensemble of $B$ probabilistic neural dynamics models, each
+parameterized by $\theta^{(b)}$. Each model predicts a Gaussian transition distribution for the next state. These models are trained using \emph{real} environment transitions collected so far.
+
+\subsection*{Dataset and Training Setup}
+PETS maintains a dataset of real transitions:
+\[
+\mathcal{D}
+=
+\{(s_t,a_t,r_{t+1},s_{t+1})\}.
+\]
+
+\begin{itemize}
+    \item This dataset contains \textbf{only real environment data}, \emph{not} model-generated rollouts.
+    \item Every ensemble model is trained on a bootstrap resample of this same dataset.
+\end{itemize}
+
+PETS typically predicts \emph{state differences},
+\[
+s_{t+1} = s_t + f_{\theta^{(b)}}(s_t,a_t),
+\]
+but for clarity we use absolute-state prediction. This does not affect the
+derivations.
+
+\subsection*{Model Parameterization}
+
+\begin{itemize}
+    \item Each model defines the conditional transition distribution
+    \[
+    p_{\theta^{(b)}}(s_{t+1}\mid s_t,a_t)
+    =
+    \mathcal{N}\!\Big(
+        \mu_{\theta^{(b)}}(s_t,a_t),\;
+        \Sigma_{\theta^{(b)}}(s_t,a_t)
+    \Big),
+    \qquad \forall b\in\{1,\dots,B\}.
+    \]
+
+    \item The neural network outputs:
+    \begin{itemize}
+        \item mean: $\mu_{\theta^{(b)}}(s,a)$,
+        \item log-standard-deviation: $\log {\sigma}_{\theta^{(b)}}(s,a)$.
+    \end{itemize}
+
+    \item Standard deviations are recovered as
+    \[
+    \sigma_{\theta^{(b)}}(s,a)
+    =
+    \exp\!\big( \log {\sigma}_{\theta^{(b)}}(s,a) \big),
+    \]
+    \item The diagonal covariance is therefore
+    \[
+    \Sigma_{\theta^{(b)}}(s,a)
+    =
+    \mathrm{diag}\!\left(
+        \sigma_{\theta^{(b)},1}^2(s,a),\dots,
+        \sigma_{\theta^{(b)},d_s}^2(s,a)
+    \right).
+    \]
+\end{itemize}
+
+\subsection*{Sampling via Reparameterization}
+
+\begin{itemize}
+    \item PETS generates samples using the reparameterization rule.  
+    For $\epsilon \sim \mathcal{N}(0,I_{d_s})$:
+    \[
+    s_{t+1}^{(b)}
+    =
+    \mu_{\theta^{(b)}}(s_t,a_t)
+    +
+    \sigma_{\theta^{(b)}}(s_t,a_t)\odot \epsilon.
+    \]
+
+    \item This sampling expression is equivalent to drawing from the Gaussian
+    \[
+    \mathcal{N}\!\big(
+        \mu_{\theta^{(b)}}(s_t,a_t),\;
+        \mathrm{diag}(\sigma_{\theta^{(b)}}^2(s_t,a_t))
+    \big),
+    \]
+    but represents a single realization rather than the distribution itself.
+\end{itemize}
+
+\subsection{Training Objective}
+
+Given a dataset 
+\(
+\mathcal{D}=\{(s_n,a_n,s_{n+1})\}_{n=1}^{|\mathcal{D}|},
+\)
+each ensemble model $b$ is trained on a bootstrap resample 
+$\mathcal{D}_b$ by minimizing the negative log-likelihood of the
+Gaussian transition model:
+\[
+\mathcal{L}(\theta^{(b)})
+=
+\sum_{n\in\mathcal{D}_b}
+\left[
+\big(s_{n+1}-\mu_{\theta^{(b)}}(s_n,a_n)\big)^\top
+\Sigma_{\theta^{(b)}}^{-1}(s_n,a_n)
+\big(s_{n+1}-\mu_{\theta^{(b)}}(s_n,a_n)\big)
++
+\log\det \Sigma_{\theta^{(b)}}(s_n,a_n)
+\right].
+\]
+
+This updates the model parameters $\theta^{(1)}, \ldots, \theta^{(B)}$.  A trained PETS model $b$ predicts a probabilistic next-state transition by computing the mean $\mu_{\theta^{(b)}}(s_t,a_t)$ and covariance $\Sigma_{\theta^{(b)}}(s_t,a_t)$, with samples generated via
+\[
+s_{t+1}^{(b)}
+=
+\mu_{\theta^{(b)}}(s_t,a_t)
++
+\sigma_{\theta^{(b)}}(s_t,a_t)\odot\epsilon,
+\qquad
+\epsilon\sim\mathcal{N}(0,I).
+\]
+
+\begin{itemize}
+    \item PETS uses Gaussian dynamics models whose predicted variances represent aleatoric uncertainty.
+    \item PETS employs bootstrap-resampled datasets to induce model diversity, representing epistemic uncertainty.
+    \item PETS trains each model by minimizing the Gaussian negative log-likelihood.
+\end{itemize}
+
+\begin{mdframed}[linecolor=red, linewidth=2pt]
+\subsection{Derivation of the PETS Negative Log-Likelihood Loss}
+\paragraph{Step 1: Multivariate Gaussian Transition Model.}
+For each transition $(s_n,a_n,s_{n+1})$, the ensemble model $b$ predicts
+\[
+p_{\theta^{(b)}}(s_{n+1}\mid s_n,a_n)
+=
+\mathcal{N}\!\Big(
+\mu_{\theta^{(b)}}(s_n,a_n),\;
+\Sigma_{\theta^{(b)}}(s_n,a_n)
+\Big),
+\]
+where $\mu_{\theta^{(b)}}(s_n,a_n)\in\mathbb{R}^{d_s}$ and
+$\Sigma_{\theta^{(b)}}(s_n,a_n)\in\mathbb{R}^{d_s\times d_s}$.
+
+\paragraph{Step 2: Negative Log-Likelihood of a Multivariate Gaussian.}
+The probability density of a $d_s$-dimensional Gaussian is
+\[
+p(x\mid\mu,\Sigma)
+=
+\frac{1}{(2\pi)^{d_s/2}|\Sigma|^{1/2}}
+\exp\!\left(
+-\tfrac{1}{2}(x-\mu)^\top \Sigma^{-1}(x-\mu)
+\right).
+\]
+Taking $x=s_{n+1}$, the negative log-likelihood becomes
+\[
+-\log p(s_{n+1})
+=
+\tfrac{1}{2}(s_{n+1}-\mu)^\top \Sigma^{-1}(s_{n+1}-\mu)
++
+\tfrac{1}{2}\log\det\Sigma
++
+\tfrac{d_s}{2}\log(2\pi).
+\]
+
+\paragraph{Step 3: Removing Constants (PETS Approximation).}
+Because the constant $\frac{d_s}{2}\log(2\pi)$ and the factor
+$\frac{1}{2}$ do not depend on $\theta^{(b)}$, PETS removes them:
+\[
+\mathcal{L}(s_{n+1})
+=
+(s_{n+1}-\mu)^\top\Sigma^{-1}(s_{n+1}-\mu)
++
+\log\det\Sigma.
+\]
+
+\paragraph{Step 4: Diagonal Covariance Structure.}
+\[
+\Sigma_{\theta^{(b)}}(s_n,a_n)
+=
+\mathrm{diag}\!\left(\sigma_1^2,\dots,\sigma_{d_s}^2\right),
+\qquad
+\Sigma^{-1}_{\theta^{(b)}}
+=
+\mathrm{diag}\!\left(\sigma_1^{-2},\dots,\sigma_{d_s}^{-2}\right).
+\]
+
+\[
+(s_{n+1}-\mu)^\top \Sigma^{-1}(s_{n+1}-\mu)
+=
+\sum_{i=1}^{d_s} \frac{(s_{n+1,i}-\mu_i)^2}{\sigma_i^2}.
+\]
+
+\[
+\log\det\Sigma
+=
+\sum_{i=1}^{d_s} \log(\sigma_i^2)
+=
+2\sum_{i=1}^{d_s} \log\sigma_i.
+\]
+
+\paragraph{Step 5: Neural Network Parameterization.}
+Since
+\[
+\sigma_i = \exp(\log \tilde{\sigma}_i),
+\qquad
+\log \sigma_i = \log \tilde{\sigma}_i,
+\]
+the log-determinant becomes
+\[
+\log\det\Sigma = 2 \sum_{i=1}^{d_s} \log\tilde{\sigma}_i.
+\]
+
+\paragraph{Step 6: Final PETS Loss.}
+\[
+\begin{split}
+\mathcal{L}(\theta^{(b)}) = \sum_{n\in\mathcal{D}_b} \bigg[ &
+\big(s_{n+1}-\mu_{\theta^{(b)}}(s_n,a_n)\big)^\top 
+\Sigma_{\theta^{(b)}}^{-1}(s_n,a_n) 
+\big(s_{n+1}-\mu_{\theta^{(b)}}(s_n,a_n)\big)  \\
+& + \log\det \Sigma_{\theta^{(b)}}(s_n,a_n) \bigg].
+\end{split}
+\]
+\end{mdframed}
+
+\begin{mdframed}[linecolor=red, linewidth=2pt]
+\subsection{Bootstrap Resampling in PETS}
+
+PETS uses bootstrap ensembles to capture epistemic uncertainty.
+
+\begin{itemize}
+    \item For each ensemble model $b \in \{1,\dots,B\}$:
+    \[
+    \mathcal{D}_b = \{(s_{n_i},a_{n_i},s_{n_i+1})\}_{i=1}^{|\mathcal{D}|},
+    \]
+    where indices $n_i$ are sampled \emph{with replacement}.
+\end{itemize}
+
+\[
+\mathrm{Var}_b\!\left[
+p_{\theta^{(b)}}(s_{t+1}\mid s_t,a_t)
+\right]
+\]
+quantifies epistemic uncertainty.
+\end{mdframed}
+
+\section{PETS Phase 2: Trajectory Sampling (TS$\infty$) and MPC Planning with CEM}
+
+Once the ensemble dynamics models $\{\theta^{(1)},\dots,\theta^{(B)}\}$ are 
+trained (Phase~1), their parameters are \emph{frozen}. PETS then performs 
+model-predictive control by optimizing over action sequences rather than model 
+parameters. Phase~2 consists of two components: (i) Trajectory Sampling under 
+persistent model assignments (TS$\infty$), and (ii) action-sequence 
+optimization using the Cross-Entropy Method (CEM).
+
+\subsection{Step 1: Persistent Model Assignment (TS$\infty$)}
+To account for epistemic uncertainty, PETS assigns each particle to a single
+ensemble model for the entire planning horizon $H$:
+\[
+b_i \sim \mathrm{Uniform}\{1,\dots,B\},
+\qquad i=1,\dots,N.
+\]
+Each particle $i$ therefore evolves using model $b_i$ for all predicted future 
+transitions.
+
+\begin{itemize}
+
+    \item \textbf{Candidate action sequence $A$.}
+    CEM proposes a length-$H$ sequence
+    \[
+        A = (a_t, a_{t+1}, \dots, a_{t+H-1}),
+    \]
+    and all actions used during rollout satisfy
+    \[
+        a_{t+h} \;\text{is the $h$-th element of } A,\qquad h=0,\dots,H-1.
+    \]
+
+    \item \textbf{Particles (parallel stochastic simulations).}
+    For each candidate $A$, PETS evaluates it using $N$ particles.
+    Particles correspond to \emph{multiple stochastic rollouts of the same}
+    sequence $A$.  
+    Each particle:
+    \begin{itemize}
+        \item samples one ensemble model index $b_i$,
+        \item applies the same action sequence $A$,
+        \item generates a trajectory
+        \[
+            s_t^{(i)} \rightarrow s_{t+1}^{(i)}
+            \rightarrow \dots \rightarrow
+            s_{t+H}^{(i)}.
+        \]
+    \end{itemize}
+
+    \item \textbf{Particle state propagation.}
+    Using the action $a_{t+h}$ taken from $A$:
+    \[
+        s_{t+h+1}^{(i)}
+        =
+        \mu_{\theta^{(b_i)}}\!\left(s_{t+h}^{(i)}, a_{t+h}\right)
+        +
+        \xi_{t+h}^{(i)},\qquad
+        \xi_{t+h}^{(i)}\sim
+        \mathcal{N}\!\Big(0,
+        \Sigma_{\theta^{(b_i)}}\!\left(s_{t+h}^{(i)}, a_{t+h}\right)\Big).
+    \]
+
+    \item \textbf{Outcome of particle rollout.}
+    After propagating states for all $h=0,\dots,H-1$, particle $i$ produces
+    the full sequence of state--action pairs
+    \[
+        (s_t^{(i)}, a_t),\;
+        (s_{t+1}^{(i)}, a_{t+1}),\;
+        \dots,\;
+        (s_{t+H-1}^{(i)}, a_{t+H-1}),
+    \]
+    together with the terminal state $s_{t+H}^{(i)}$.
+
+    \item \textbf{Return estimation of $A$.}
+    \[
+        \hat{J}(A)
+        =
+        \frac{1}{N}
+        \sum_{i=1}^N
+        \sum_{h=0}^{H-1}
+        \gamma^{h}\,
+        r\!\left(s_{t+h}^{(i)}, a_{t+h}\right).
+    \]
+
+    \item \textbf{Why PETS Does Not Model the Reward.}
+    PETS assumes that the environment already provides a known reward function
+    \[
+        r(s_t, a_t),
+    \]
+    and therefore does not learn a separate reward model. 
+
+\end{itemize}
+
+\subsection{Step 2: Particle Initialization}
+All particles begin from the current real environment state:
+\[
+s_t^{(i)} = s_t, 
+\qquad i = 1,\dots,N.
+\]
+
+\subsection{Step 3: Candidate Action Sequence Sampling}
+CEM maintains a Gaussian search distribution over length-$H$ action sequences:
+\[
+A = (a_t, a_{t+1}, \dots, a_{t+H-1})
+\sim \mathcal{N}\!\left(\mathbf{m}^{(j)},\,\mathbf{C}^{(j)}\right),
+\]
+where $\mathbf{m}^{(j)} \in \mathbb{R}^{H d_a}$ is the mean vector and 
+$\mathbf{C}^{(j)} \in \mathbb{R}^{H d_a \times H d_a}$ is typically diagonal.
+
+Sampling uses a valid reparameterization:
+\[
+A = \mathbf{m}^{(j)} + L^{(j)} \epsilon,
+\qquad
+\epsilon \sim \mathcal{N}(0, I_{Hd_a}),
+\qquad
+L^{(j)} = \mathrm{diag}(\sigma^{(j)}),
+\]
+where $\sigma^{(j)}$ is the vector of per-dimension standard deviations. $L^{(j)}$ is the Cholesky factor of $C^{(j)}$,  $\qquad C^{(j)} = L^{(j)} {L^{(j)}}^{\!\top}$.
+
+\begin{itemize}
+    \item \textbf{Action dimension.}  
+    Each action is a $d_a$-dimensional continuous vector:
+    \[
+       a_t \in \mathbb{R}^{d_a}.
+    \]
+\end{itemize}
+
+\subsection{Step 4: Trajectory Rollouts Under Model $b_i$}
+For each sampled candidate sequence $A$ and particle $i$, PETS propagates the
+state forward using the model permanently assigned to the particle:
+\[
+s_{t+h+1}^{(i)}
+=
+\mu_{\theta^{(b_i)}}\!\left(s_{t+h}^{(i)},\,a_{t+h}\right)
++
+\sigma_{\theta^{(b_i)}}\!\left(s_{t+h}^{(i)},\,a_{t+h}\right)
+\odot \epsilon_{t+h}^{(i)},
+\]
+\[
+\epsilon_{t+h}^{(i)} \sim \mathcal{N}(0,I_{d_s}),
+\qquad h = 0,\dots,H-1.
+\]
+
+This captures:
+\begin{itemize}
+    \item \textbf{aleatoric uncertainty} via Gaussian noise, and
+    \item \textbf{epistemic uncertainty} via persistent model assignment $b_i$.
+\end{itemize}
+
+\subsection{Step 5: Monte Carlo Return Estimation}
+The predicted return of the action sequence $A$ is estimated by averaging 
+particle rollouts:
+\[
+\hat{J}(A)
+=
+\frac{1}{N}
+\sum_{i=1}^{N}
+\sum_{h=0}^{H-1}
+\gamma^{h}\,
+r\!\left(s_{t+h}^{(i)},\,a_{t+h}\right).
+\]
+
+\subsection{Step 6: Elite Selection in CEM}
+After evaluating $K$ candidate sequences 
+$\{A^{(1)},\dots,A^{(K)}\}$, the top $K_{\mathrm{elite}}$ sequences (highest 
+predicted returns) are chosen:
+\[
+\mathcal{E}^{(j)} =
+\left\{ 
+A^{(k_1)},\dots,A^{(k_{K_{\mathrm{elite}}})}
+\right\},
+\qquad
+\hat{J}\!\left(A^{(k_1)}\right)
+\ge \dots \ge
+\hat{J}\!\left(A^{(k_{K_{\mathrm{elite}}})}\right).
+\]
+
+\subsection{Step 7: Update CEM Mean and Covariance}
+Elite mean:
+\[
+\mathbf{m}_{\mathrm{new}}
+=
+\frac{1}{K_{\mathrm{elite}}}
+\sum_{A\in\mathcal{E}^{(j)}} A.
+\]
+
+Elite covariance:
+\[
+\mathbf{C}_{\mathrm{new}}
+=
+\frac{1}{K_{\mathrm{elite}}}
+\sum_{A\in\mathcal{E}^{(j)}}
+\left(A-\mathbf{m}_{\mathrm{new}}\right)
+\left(A-\mathbf{m}_{\mathrm{new}}\right)^\top.
+\]
+
+Exponential smoothing to prevent premature collapse:
+\[
+\mathbf{m}^{(j+1)}
+=
+\alpha\,\mathbf{m}_{\mathrm{new}}
++
+(1-\alpha)\,\mathbf{m}^{(j)},
+\]
+\[
+\mathbf{C}^{(j+1)}
+=
+\alpha\,\mathbf{C}_{\mathrm{new}}
++
+(1-\alpha)\,\mathbf{C}^{(j)}.
+\]
+
+\subsection{Step 8: Final Action Selection}
+After $J$ iterations of CEM, the optimized mean sequence
+$\mathbf{m}^{(J)}$ defines the MPC plan. The first action is applied to the
+real environment:
+\[
+a_t^{*} = \mathbf{m}^{(J)}_1.
+\]
+
+\end{flushleft}
+
+\newpage
+\pagebreak
+
+\section*{1. PETS Planning Modes}
+
+PETS supports two distinct ways of generating action sequences:
+
+\subsection*{(A) Trajectory Sampling (TS$\infty$)}
+\textit{(Standalone planning mode --- no optimization)}
+
+\begin{itemize}
+    \item Pick one dynamics model per particle.
+    \item Sample many action sequences from a fixed distribution.
+    \item For each sequence, roll out TS$\infty$ particles to compute predicted return
+    (each particle uses its assigned model for the entire horizon).
+    \item Choose the best action sequence based purely on return.
+    \item \textbf{No optimization step.}
+    \item \textbf{No elite selection.}
+    \item \textbf{No mean/variance updates.}
+\end{itemize}
+
+\subsection*{(B) CEM-MPC (Cross-Entropy Method)}
+\textit{(Optimization-based planning mode)}
+
+\begin{itemize}
+    \item Maintain a Gaussian distribution over action sequences.
+    \item Sample a batch of candidate action sequences from this Gaussian.
+    \item \textbf{Evaluate each sequence using TS$\infty$ rollouts} 
+    (TS$\infty$ is used here as the return estimator).
+    \item Rank sequences by predicted return.
+    \item Select the top-$K$ elites.
+    \item Update the mean and covariance of the Gaussian distribution.
+    \item Repeat for $J$ iterations to refine the distribution.
+    \item Output the final optimized action sequence.
+\end{itemize}
+
+\noindent\textbf{Key insight:} TS$\infty$ is not a separate planning mode inside CEM; it is the \emph{inner-loop return evaluator} used during CEM optimization.
+
+\subsection*{2.1.\hspace{0.2cm}PETS — Probabilistic Ensembles with Trajectory Sampling}
+
+PETS is a model-based RL framework that includes:
+\begin{itemize}
+    \item A probabilistic ensemble dynamics model
+    \item A trajectory sampling mechanism (TS$\infty$)
+    \item A planning algorithm to choose actions
+\end{itemize}
+
+Inside PETS, action selection can be done by:
+\begin{itemize}
+    \item CEM-MPC
+    \item Shooting (random shooting)
+    \item MPPI
+    \item Or any other planning method
+\end{itemize}
+
+Thus,
+\[
+\text{PETS} = \text{Ensemble dynamics} + \text{Trajectory sampling} + \text{Planner}.
+\]
+
+\subsection*{3.\hspace{0.2cm}Model Predictive Control (MPC)}
+
+MPC itself is just a planning technique:
+\begin{itemize}
+    \item Roll out candidate action sequences
+    \item Evaluate predicted returns using the model
+    \item Pick the best sequence (or optimize it)
+\end{itemize}
+
+MPC does not specify what the model is; it only tells you \emph{how} to plan once a model exists.
+
+\subsection*{3.1.\hspace{0.2cm}CEM-MPC}
+
+CEM-MPC is simply:
+\begin{itemize}
+    \item MPC whose optimizer is the Cross-Entropy Method (CEM)
+    \item Applied to the learned model to produce an optimized action sequence
+\end{itemize}
+
+It is one type of planner used inside PETS.
+
+
+
+\section{Algorithm: PETS (Probabilistic Ensembles with Trajectory Sampling)}
+
+\begin{algorithm}[H]
+\caption{PETS: Probabilistic Ensembles with Trajectory Sampling (Part 1)}
+\begin{algorithmic}[1]
+
+\State \textbf{Inputs:}
+\State \hspace{0.5cm} Ensemble size $B$
+\State \hspace{0.5cm} Planning horizon $H$
+\State \hspace{0.5cm} Number of particles $N$
+\State \hspace{0.5cm} Number of CEM samples $K$
+\State \hspace{0.5cm} Number of elite samples $K_{\text{elite}}$
+\State \hspace{0.5cm} Number of CEM iterations $J$
+\State \hspace{0.5cm} Smoothing factor $\alpha$
+\State \hspace{0.5cm} Dataset $\mathcal{D}$ initially empty
+
+\State Initialize ensemble model parameters $\theta^{(1)}, \dots, \theta^{(B)}$
+\State Initialize CEM mean vector and covariance matrix
+
+% ----------------------------------------------------------
+\Statex \hrulefill
+\Statex \textbf{Phase 1: Dataset Collection and Ensemble Training}
+\Statex \hrulefill
+
+\While{size of $\mathcal{D}$ is less than required initial samples}
+    \State Select a random exploratory action $a_t$
+    \State Execute $a_t$ in the real environment
+    \State Observe next state $s_{t+1}$ and reward $r_{t+1}$
+    \State Add tuple $(s_t, a_t, r_{t+1}, s_{t+1})$ to dataset $\mathcal{D}$
+\EndWhile
+
+\State \textbf{Train Ensemble Models:}
+\For{each model index $b = 1$ to $B$}
+
+    \State Construct bootstrap dataset $\mathcal{D}_b$ by sampling from $\mathcal{D}$ with replacement
+
+    \State Each model predicts Gaussian dynamics:
+    \State \hspace{0.7cm}
+      $p_{\theta^{(b)}}(s' \mid s,a) = 
+      \mathcal{N}\!\big(\mu_{\theta^{(b)}}(s,a),\;
+                       \Sigma_{\theta^{(b)}}(s,a)\big)$
+
+    \State Train model $b$ by minimizing negative log-likelihood:
+    \State \hspace{0.7cm}
+      $s_{n+1} \approx 
+      \mu_{\theta^{(b)}}(s_n,a_n)
+      + \sigma_{\theta^{(b)}}(s_n,a_n)\odot \epsilon, \;
+      \epsilon \sim \mathcal{N}(0,I)$
+
+    \State Prediction error term:
+    \State \hspace{0.7cm}
+      $(s_{n+1}-\mu_{\theta^{(b)}}(s_n,a_n))^\top 
+       \Sigma_{\theta^{(b)}}^{-1}(s_n,a_n)
+       (s_{n+1}-\mu_{\theta^{(b)}}(s_n,a_n))$
+
+    \State Variance penalty:
+    \State \hspace{0.7cm}
+      $\log\det \Sigma_{\theta^{(b)}}(s_n,a_n)$
+
+    \State Full loss for model $b$:
+    \State \hspace{0.7cm}
+      $\mathcal{L}(\theta^{(b)}) =
+      \sum_{(s_n,a_n,s_{n+1}) \in \mathcal{D}_b}
+      \Big[
+      (s_{n+1}-\mu)^T \Sigma^{-1} (s_{n+1}-\mu)
+      + \log\det\Sigma
+      \Big]$
+
+    \State Update $\theta^{(b)}$ via gradient descent
+
+\EndFor
+
+% Stop here and split pages
+\algstore{pets}
+
+\end{algorithmic}
+\end{algorithm}
+
+
+\begin{algorithm}[H]
+\caption{PETS: Probabilistic Ensembles with Trajectory Sampling (Part 2)}
+\begin{algorithmic}[1]
+\algrestore{pets}
+
+% ----------------------------------------------------------
+\Statex \hrulefill
+\Statex \textbf{Phase 2: MPC Action Selection using TS$\infty$ + CEM}
+\Statex \hrulefill
+
+\While{task not terminated}
+
+    \State Observe current state $s_t$
+
+    % ---------------------------------------------
+    \Statex \textbf{CEM Optimization Loop}
+    \For{$j = 0$ to $J-1$}
+
+        \State Sample $K$ candidate action sequences ($A \sim \mathcal{N}\!\big(m^{(j)},\, C^{(j)}\big)$.
+        \Statex \hspace{0.7cm} Each sequence sampled as:
+        \Statex \hspace{0.7cm} $A = m^{(j)} + L^{(j)}\epsilon,\;\; \epsilon \sim \mathcal{N}(0,I)$
+
+        % ---------------------------------------------
+        \Statex \textbf{Evaluate Each Candidate Sequence}
+        \For{$k = 1$ to $K$}
+
+            \State Assign each particle $i$ a persistent model:
+            \Statex \hspace{0.7cm} $b_i \sim \mathrm{Uniform}\{1,\dots,B\}$
+
+            \State Initialize particle state:
+            \Statex \hspace{0.7cm} $s_t^{(i)} \gets s_t$
+
+            \For{$h = 0$ to $H-1$}
+
+                \State Extract action $a_{t+h}$ from candidate $A^{(k)}$
+
+                \State Model prediction for particle $i$:
+                \Statex \hspace{0.7cm}
+                $\mu_{b_i} \gets \mu_{\theta^{(b_i)}}(s_{t+h}^{(i)}, a_{t+h})$
+                \Statex \hspace{0.7cm}
+                $\Sigma_{b_i} \gets \Sigma_{\theta^{(b_i)}}(s_{t+h}^{(i)}, a_{t+h})$
+
+                \State Sample aleatoric noise:
+                \Statex \hspace{0.7cm}
+                $\epsilon_{t+h}^{(i)} \sim \mathcal{N}(0,I)$
+
+                \State Next-state prediction:
+                \Statex \hspace{0.7cm}
+                $s_{t+h+1}^{(i)} = \mu_{b_i} + \sigma_{b_i} \odot \epsilon_{t+h}^{(i)}$
+
+            \EndFor
+
+            \State Predicted return for candidate $A^{(k)}$:
+            \Statex \hspace{0.7cm}
+            $\hat{J}(A^{(k)}) = \frac{1}{N} \sum_{i=1}^N \sum_{h=0}^{H-1} 
+            \gamma^{h} r(s_{t+h}^{(i)}, a_{t+h})$
+
+        \EndFor
+
+        % ---------------------------------------------
+        \Statex \textbf{Elite Selection and Distribution Update}
+
+        \State Select top $K_{\text{elite}}$ sequences by $\hat{J}(A^{(k)})$
+
+        \State Compute elite mean:
+        \Statex \hspace{0.7cm}
+        $m_{\text{elite}} = \frac{1}{K_{\text{elite}}}
+        \sum_{A \in \mathcal{E}} A$
+
+        \State Compute elite covariance:
+        \Statex \hspace{0.7cm}
+        $C_{\text{elite}} = \frac{1}{K_{\text{elite}}}
+        \sum_{A \in \mathcal{E}} (A - m_{\text{elite}})(A - m_{\text{elite}})^\top$
+
+        \State Update CEM parameters (smoothed):
+        \Statex \hspace{0.7cm}
+        $m^{(j+1)} = \alpha m_{\text{elite}} + (1-\alpha)m^{(j)}$
+        \Statex \hspace{0.7cm}
+        $C^{(j+1)} = \alpha C_{\text{elite}} + (1-\alpha)C^{(j)}$
+
+    \EndFor  % end CEM iterations
+
+    % ---------------------------------------------
+    \Statex \textbf{Execute the First Action of Optimized Plan}
+
+    \State Apply first action of optimized sequence:
+    \Statex \hspace{0.7cm} $a_t^{*} = m^{(J)}_1$ (Note: $m^{(J)}$  is the best action sequence found by CEM or by trajectory sampling.
+    \State Execute $a_t^{*}$ in real environment
+    \State Observe $(s_{t+1}, r_{t+1})$
+    \State Add $(s_t, a_t^{*}, r_{t+1}, s_{t+1})$ to dataset $\mathcal{D}$
+
+    \If{retraining condition is satisfied}
+        \State Retrain ensemble models using bootstrap sampling
+    \EndIf
+
+\EndWhile
+
+\end{algorithmic}
+\end{algorithm}
+
+
+
+
+\newpage
+\pagebreak
+
+\section*{Model-Based Offline Policy Optimization (MOPO) with Conservative Q-Learning (CQL) for Discrete Actions}
+
+MOPO + CQL combines uncertainty-penalized model-based synthetic rollouts (MOPO) with Conservative Q-Learning (CQL), a strong offline RL algorithm for discrete action spaces. CQL explicitly penalizes Q-values for unseen (OOD) actions, preventing overestimation and stabilizing training. This addresses the primary failure mode of offline RL: value extrapolation.
+
+% --------------------------------------------------------------
+\subsection*{0. Notation}
+
+\begin{itemize}
+    \item $s_t \in \mathcal{S}$: state
+    \item $a_t \in \mathcal{A}=\{1,\dots,|\mathcal{A}|\}$: discrete action
+    \item $r_{t+1} = r(s_t,a_t)$: offline reward
+    \item $s_{t+1}$: next state
+    \item $d_{t+1} \in \{0,1\}$: terminal flag
+    \item $\mathcal{D}_{\text{offline}}$: fixed offline dataset
+    \item $\mathcal{D}_{\text{model}}$: synthetic model transitions
+    \item $H_{\text{model}}$: rollout horizon
+    \item $\gamma$: discount factor
+    \item $\lambda$: uncertainty penalty weight
+    \item $E$: ensemble size
+    \item $Q_\phi(s,a)$: Q-network
+    \item $Q_{\phi^-}(s,a)$: target Q-network
+    \item $\alpha$: CQL regularization weight
+\end{itemize}
+
+Ensemble dynamics model:
+\[
+p_{\theta^{(b)}}(s'|s,a)
+=
+\mathcal{N}\!\left(
+\mu_{\theta^{(b)}}(s,a),
+\Sigma_{\theta^{(b)}}(s,a)
+\right).
+\]
+
+Model uncertainty (ensemble disagreement):
+\[
+u(s,a)
+=
+\mathrm{Var}_{b=1..E}
+\big[\mu_{\theta^{(b)}}(s,a)\big].
+\]
+
+% --------------------------------------------------------------
+\subsection*{1. Offline Dataset Setup}
+
+\[
+\mathcal{D}_{\text{offline}}
+=
+\{(s_t,a_t,r_{t+1},s_{t+1},d_{t+1})\}.
+\]
+
+No real environment interaction occurs:
+\[
+\text{All data is offline.}
+\]
+
+% --------------------------------------------------------------
+\subsection*{2. Train Ensemble Dynamics Model}
+
+Each model minimizes negative log-likelihood:
+\[
+\mathcal{L}_{\text{model}}(\theta^{(b)})
+=
+-
+\mathbb{E}_{(s,a,s')\sim\mathcal{D}_{\text{offline}}}
+\left[
+\log p_{\theta^{(b)}}(s'|s,a)
+\right].
+\]
+
+Parameter update:
+\[
+\theta^{(b)}
+\leftarrow
+\theta^{(b)}
+-
+\eta_\theta
+\nabla_{\theta^{(b)}}\mathcal{L}_{\text{model}}.
+\]
+
+% --------------------------------------------------------------
+\subsection*{3. Synthetic Rollout Generation with MOPO Penalty}
+
+Sample start state:
+\[
+s_0^{(i)} \sim \mathcal{D}_{\text{offline}}.
+\]
+
+Sample \textbf{one} model per rollout:
+\[
+b_i \sim \mathrm{Uniform}\{1,\dots,E\}.
+\]
+
+\noindent For each step $h = 0,\dots,H_{\text{model}}-1$:
+
+\paragraph{1. Action selection}
+\[
+a_h^{(i)} = \arg\max_{a} Q_\phi(s_h^{(i)},a).
+\]
+
+\paragraph{2. Next state prediction}
+\[
+s_{h+1}^{(i)}
+=
+\mu_{\theta^{(b_i)}}(s_h^{(i)},a_h^{(i)})
++
+\xi,
+\quad
+\xi \sim \mathcal{N}(0,\Sigma_{\theta^{(b_i)}}(s_h^{(i)},a_h^{(i)})).
+\]
+
+\paragraph{3. Penalized reward}
+\[
+\tilde{r}_{h+1}^{(i)}
+=
+r(s_h^{(i)},a_h^{(i)})
+-
+\lambda\,u(s_h^{(i)},a_h^{(i)}).
+\]
+
+\paragraph{4. Store transition}
+\[
+(s_h^{(i)}, a_h^{(i)}, \tilde{r}_{h+1}^{(i)}, s_{h+1}^{(i)}, 0)
+\in \mathcal{D}_{\text{model}}.
+\]
+
+% --------------------------------------------------------------
+\subsection*{4. Conservative Q-Learning (CQL)}
+
+Training buffer:
+\[
+\mathcal{B}
+=
+\mathcal{D}_{\text{offline}}
+\cup
+\mathcal{D}_{\text{model}}.
+\]
+
+% --------------------
+\subsubsection*{4.1 CQL Conservative Penalty (Discrete, Exact)}
+
+\[
+\mathcal{L}_{\text{CQL}}^{\text{penalty}}
+=
+\alpha\,
+\mathbb{E}_{s\sim\mathcal{B}}
+\left[
+\log \sum_{a\in\mathcal{A}} \exp(Q_\phi(s,a))
+-
+\mathbb{E}_{a\sim\mathcal{B}(a|s)} Q_\phi(s,a)
+\right].
+\]
+
+% --------------------
+\subsubsection*{4.2 TD Target (Double-Q)}
+
+Online action selection:
+\[
+a^\star = \arg\max_{a'} Q_\phi(s_{t+1},a').
+\]
+
+Target value:
+\[
+y_t =
+\tilde{r}_{t+1}
++
+\gamma (1-d_{t+1})
+Q_{\phi^-}(s_{t+1}, a^\star).
+\]
+
+Bellman loss:
+\[
+\mathcal{L}_{\text{TD}}
+=
+\mathbb{E}_{(s,a,\tilde{r},s')\sim\mathcal{B}}
+\big[
+(Q_\phi(s,a)-y_t)^2
+\big].
+\]
+
+% --------------------
+\subsubsection*{4.3 Full CQL Objective}
+
+\[
+\mathcal{L}_{\text{CQL}}
+=
+\mathcal{L}_{\text{TD}}
++
+\mathcal{L}_{\text{CQL}}^{\text{penalty}}.
+\]
+
+Parameter update:
+\[
+\phi
+\leftarrow
+\phi - \eta_\phi \nabla_\phi \mathcal{L}_{\text{CQL}}.
+\]
+
+Target update:
+\[
+\phi^- \leftarrow \phi.
+\]
+
+% --------------------------------------------------------------
+\subsection*{5. Full MOPO + CQL Algorithm}
+
+\begin{algorithm}[H]
+\caption{MOPO + CQL (Discrete Actions)}
+\begin{algorithmic}[1]
+
+\State Initialize Q-network $\phi$ and target $\phi^-$
+\State Initialize ensemble $\{\theta^{(b)}\}_{b=1}^E$
+\State Initialize synthetic buffer $\mathcal{D}_{\text{model}} = \emptyset$
+
+\Statex
+
+\State \textbf{Train ensemble dynamics model}
+\For{each model $b$}
+    \State minimize NLL on $\mathcal{D}_{\text{offline}}$
+\EndFor
+
+\While{not converged}
+
+    \Statex \textbf{Generate synthetic rollouts}
+    \For{each rollout $i$}
+        \State Sample $s_0^{(i)} \sim \mathcal{D}_{\text{offline}}$
+        \State Sample one model index $b_i$
+        \For{$h = 0$ to $H_{\text{model}} - 1$}
+            \State $a_h^{(i)} = \arg\max_{a} Q_\phi(s_h^{(i)},a)$
+            \State Predict $s_{h+1}^{(i)}$ using $\theta^{(b_i)}$
+            \State Compute $u(s_h^{(i)},a_h^{(i)})$
+            \State Compute $\tilde{r}_{h+1}^{(i)}$
+            \State Store transition in $\mathcal{D}_{\text{model}}$
+        \EndFor
+    \EndFor
+
+    \Statex \textbf{CQL Training}
+    \State $\mathcal{B} = \mathcal{D}_{\text{offline}} \cup \mathcal{D}_{\text{model}}$
+    \State Compute conservative penalty
+    \State Compute TD targets
+    \State Update Q-network using full CQL loss
+    \State Update target network $\phi^- \leftarrow \phi$
+
+\EndWhile
+
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\newpage
+\pagebreak
+
+
+\section*{Model-Based Offline Policy Optimization (MOPO) with IQL (Continuous Actions)}
+
+MOPO + IQL for continuous action spaces combines MOPO's ensemble world model 
+and uncertainty penalty with IQL's stable offline RL framework and a squashed 
+Gaussian policy. Continuous actions are sampled from a $\tanh$-squashed Gaussian, 
+ensuring bounded outputs while preserving differentiability.
+
+% ============================================================================
+\subsection*{0. Notation}
+
+\begin{itemize}
+    \item $s_t \in \mathcal{S}$: state
+    \item $a_t \in \mathbb{R}^d$: continuous action
+    \item $r_{t+1} = r(s_t,a_t)$: reward from offline dataset
+    \item $s_{t+1}$: next state from offline dataset
+    \item $d_{t+1} \in \{0,1\}$: termination flag
+    \item $\mathcal{D}_{\text{offline}}$: fixed offline dataset
+    \item $\mathcal{D}_{\text{model}}$: model-generated transitions
+    \item $H_{\text{model}}$: model rollout horizon
+    \item $\gamma$: discount factor
+    \item $\lambda$: model uncertainty penalty
+    \item $E$: ensemble size
+    \item $Q_\phi(s,a)$: Q-network
+    \item $V_\psi(s)$: expectile value network
+    \item $\pi_\theta(a|s)$: squashed Gaussian IQL policy
+    \item $\tau \in (0.5,1)$: expectile coefficient
+    \item $\beta > 0$: advantage temperature
+\end{itemize}
+
+Squashed Gaussian policy:
+\[
+a = \tanh\!\left( \mu_\theta(s) + \sigma_\theta(s) \epsilon \right),
+\qquad
+\epsilon \sim \mathcal{N}(0,I).
+\]
+
+Ensemble dynamics model:
+\[
+p_{\theta^{(b)}}(s'|s,a)
+=
+\mathcal{N}\!\left(
+\mu_{\theta^{(b)}}(s,a),\;
+\Sigma_{\theta^{(b)}}(s,a)
+\right).
+\]
+
+Model uncertainty:
+\[
+u(s,a)
+=
+\mathrm{Var}_{b=1..E}\!\left[\mu_{\theta^{(b)}}(s,a)\right].
+\]
+
+% ============================================================================
+\subsection*{1. Offline Dataset Setup}
+
+Offline dataset:
+\[
+\mathcal{D}_{\text{offline}}
+=
+\{(s_t,a_t,r_{t+1},s_{t+1},d_{t+1})\}.
+\]
+
+Dataset is fixed; no environment interaction occurs:
+\[
+\text{Real environment is never queried.}
+\]
+
+% ============================================================================
+\subsection*{2. Train Ensemble Dynamics Model}
+
+Each model minimizes negative log-likelihood:
+\[
+\mathcal{L}_{\text{model}}(\theta^{(b)})
+=
+-
+\mathbb{E}_{(s,a,s') \sim \mathcal{D}_{\text{offline}}}
+\left[
+\log p_{\theta^{(b)}}(s'|s,a)
+\right].
+\]
+
+Gradient update:
+\[
+\theta^{(b)}
+\leftarrow
+\theta^{(b)} - \eta_\theta \nabla_{\theta^{(b)}} \mathcal{L}_{\text{model}}.
+\]
+
+% ============================================================================
+\subsection*{3. Generate Synthetic Rollouts (MOPO)}
+
+Start states:
+\[
+s_0^{(i)} \sim \mathcal{D}_{\text{offline}}.
+\]
+
+Pick ONE world model per rollout:
+\[
+b_i \sim \mathrm{Uniform}\{1,\dots,E\}.
+\]
+
+% -------------------------
+Rollout for $h = 0,\dots,H_{\text{model}}-1$:
+
+\paragraph{1. Sample continuous action}
+\[
+a_h^{(i)}
+=
+\tanh\!\left(
+\mu_\theta(s_h^{(i)})
++
+\sigma_\theta(s_h^{(i)})\,\epsilon
+\right),
+\qquad
+\epsilon \sim \mathcal{N}(0,I).
+\]
+
+\paragraph{2. Predict next state}
+\[
+s_{h+1}^{(i)}
+=
+\mu_{\theta^{(b_i)}}(s_h^{(i)},a_h^{(i)})
++
+\xi,
+\qquad
+\xi \sim \mathcal{N}(0, \Sigma_{\theta^{(b_i)}}(s_h^{(i)},a_h^{(i)})).
+\]
+
+\paragraph{3. Penalized reward}
+\[
+\tilde{r}_{h+1}^{(i)}
+=
+r(s_h^{(i)},a_h^{(i)}) - \lambda\, u(s_h^{(i)},a_h^{(i)}).
+\]
+
+\paragraph{4. Store transition}
+\[
+(s_h^{(i)},a_h^{(i)},\tilde{r}_{h+1}^{(i)},s_{h+1}^{(i)},0)
+\in
+\mathcal{D}_{\text{model}}.
+\]
+
+% ============================================================================
+\subsection*{4. IQL Training (Continuous Actions)}
+
+Training buffer:
+\[
+\mathcal{B}
+=
+\mathcal{D}_{\text{offline}}
+\cup
+\mathcal{D}_{\text{model}}.
+\]
+
+% -------------------------
+\subsubsection*{4.1 Expectile Value Learning}
+
+\[
+V_\psi(s)
+=
+\arg\min_v
+\mathbb{E}_{a\sim D_s}
+\left[
+L_\tau(Q_\phi(s,a), v)
+\right],
+\]
+
+Expectile loss:
+\[
+L_\tau(y,v)
+=
+|\tau - \mathbf{1}(y < v)| \,(y-v)^2.
+\]
+
+% -------------------------
+\subsubsection*{4.2 Q-Function Learning}
+
+TD target:
+\[
+y_t
+=
+\tilde{r}_{t+1}
++
+\gamma(1-d_{t+1}) V_\psi(s_{t+1}).
+\]
+
+Q-loss:
+\[
+\mathcal{L}_Q(\phi)
+=
+\mathbb{E}_{(s,a,\tilde{r},s')\sim\mathcal{B}}
+\left[
+(Q_\phi(s,a)-y_t)^2
+\right].
+\]
+
+% -------------------------
+\subsubsection*{4.3 Advantage-Weighted Policy Learning (AWR)}
+
+Implicit advantage:
+\[
+A(s,a) = Q_\phi(s,a) - V_\psi(s).
+\]
+
+Advantage weights:
+\[
+w(s,a)
+=
+\exp\!\left(
+\frac{A(s,a)}{\beta}
+\right).
+\]
+
+Policy loss:
+\[
+\mathcal{L}_\pi(\theta)
+=
+-
+\mathbb{E}_{(s,a)\sim\mathcal{D}_{\text{offline}}}
+\left[
+w(s,a)\,\log \pi_\theta(a|s)
+\right].
+\]
+
+% -------------------------
+\subsubsection*{4.4 Squashed Gaussian Policy}
+
+Raw Gaussian action:
+\[
+\tilde{a}
+=
+\mu_\theta(s)
++
+\sigma_\theta(s)\epsilon,
+\qquad
+\epsilon \sim \mathcal{N}(0,I).
+\]
+
+Squashed action:
+\[
+a = \tanh(\tilde{a}).
+\]
+
+Log-probability correction:
+\[
+\log \pi_\theta(a|s)
+=
+\log \mathcal{N}(\tilde{a}\, |\, \mu_\theta(s),\sigma_\theta^2(s))
+-
+\sum_{j=1}^d \log (1 - a_j^2).
+\]
+
+% ============================================================================
+\subsection*{5. Full MOPO + IQL (Continuous Actions) Training Loop}
+
+\begin{algorithm}[H]
+\caption{MOPO + IQL (Continuous Actions)}
+\begin{algorithmic}[1]
+
+\State \textbf{Input:} Offline dataset $\mathcal{D}_{\text{offline}}$
+\State Initialize ensemble $\{\theta^{(b)}\}_{b=1..E}$
+\State Initialize Q-network $\phi$, value network $\psi$
+\State Initialize policy parameters $\theta$
+\State Initialize synthetic buffer $\mathcal{D}_{\text{model}} \leftarrow \emptyset$
+
+\State \textbf{Train ensemble dynamics} via NLL on $\mathcal{D}_{\text{offline}}$
+
+\While{not converged}
+
+    \State \textbf{Generate synthetic rollouts}
+    \For{each rollout $i$}
+        \State Sample $s_0^{(i)}$ from $\mathcal{D}_{\text{offline}}$
+        \State Sample model index $b_i$
+        \For{$h = 0$ \textbf{to} $H_{\text{model}}-1$}
+            \State Sample $a_h^{(i)} = \tanh(\mu_\theta(s_h^{(i)}) + \sigma_\theta(s_h^{(i)})\epsilon)$
+            \State Predict $s_{h+1}^{(i)}$ via model $\theta^{(b_i)}$
+            \State Compute uncertainty $u(s_h^{(i)},a_h^{(i)})$
+            \State Compute penalized reward $\tilde{r}_{h+1}^{(i)}$
+            \State Store transition in $\mathcal{D}_{\text{model}}$
+        \EndFor
+    \EndFor
+
+    \State Form buffer $\mathcal{B} = \mathcal{D}_{\text{offline}} \cup \mathcal{D}_{\text{model}}$
+
+    \State Update value network $V_\psi$ via expectile regression
+    \State Update Q-network $Q_\phi$ via TD target
+    \State Update policy $\pi_\theta$ with advantage-weighted regression
+
+\EndWhile
+
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\newpage
+\pagebreak
+
+
+
+
+% \section*{Two-Level Hierarchical Reinforcement Learning (HRL) with Q-Learning at Both Levels}
+
+% \subsection*{0. Notation}
+
+% \begin{itemize}
+%     \item $s_t \in \mathcal{S}$: Environment state at primitive timestep $t$
+%     \item $g \in \mathcal{G}=\{g_1,\dots,g_M\}$: Discrete high-level goals
+%     \item $a \in \mathcal{A}=\{1,\dots,|\mathcal{A}|\}$: Primitive actions
+%     \item $Q^H_{\Phi}(s,g)$: High-level Q-function parameterized by $\Phi$
+%     \item $Q^L_{\phi}(s,g,a)$: Low-level Q-function conditioned on goal $g$, parameterized by $\phi$
+%     \item Replay buffers: $\mathcal{D}_H$ (high-level), $\mathcal{D}_L$ (low-level)
+%     \item $\gamma \in [0,1)$: Discount factor
+%     \item $\epsilon_H,\,\epsilon_L$: $\epsilon$-greedy exploration rates for high and low levels
+%     \item $\tau(s,g)\in\{0,1\}$: Goal-termination predicate (1 if goal achieved, 0 otherwise)
+%     \item $r_{\text{int}}(s, g, s')$: Intrinsic reward function (e.g., $+1$ if $\tau(s',g)=1$, else $0$ or $-\epsilon$)
+%     \item Learning rates: $\eta_H$ (high-level), $\eta_L$ (low-level)
+%     \item Soft-update rate: $\tau_{\text{target}} \in (0,1]$
+%     \item Mini-batch size: $B$
+%     \item Warmup steps: $N_{\text{warmup}}$ (minimum buffer size before training)
+% \end{itemize}
+
+% \subsection*{1. Initialization}
+
+% Initialize networks:
+% \[
+% Q^H_{\Phi}, \quad Q^L_{\phi}
+% \]
+% Initialize target networks:
+% \[
+% Q^H_{\Phi^-} \gets Q^H_\Phi, 
+% \qquad 
+% Q^L_{\phi^-} \gets Q^L_\phi
+% \]
+% Initialize replay buffers:
+% \[
+% \mathcal{D}_H=\emptyset, \qquad \mathcal{D}_L=\emptyset
+% \]
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{2. Main Training Loop}
+
+% \begin{algorithm}[H]
+% \caption{Two-Level Hierarchical Reinforcement Learning (Fully Corrected)}
+% \begin{algorithmic}[1]
+
+% \For{each episode}
+%     \State Reset environment and observe initial state $s_0$
+%     \State $t \gets 0$ \Comment{Global primitive timestep}
+
+%     \While{$t < T_{\max}$ \textbf{and} episode not terminated}
+
+%         % ---------------- HIGH-LEVEL DECISION ---------------------
+%         \State \textbf{// High-level goal selection}
+%         \State Sample $u \sim \text{Uniform}(0,1)$
+%         \If{$u < \epsilon_H$}
+%             \State $g_t \sim \text{Uniform}(\mathcal{G})$ \Comment{Explore}
+%         \Else
+%             \State $g_t \gets \arg\max_{g \in \mathcal{G}} Q^H_\Phi(s_t,g)$ \Comment{Exploit}
+%         \EndIf
+
+%         \State $s_{\text{start}} \gets s_t$ \Comment{Initial state for this goal}
+%         \State $R^H \gets 0$  \Comment{Accumulated discounted extrinsic return}
+%         \State $k \gets 0$    \Comment{Step counter within goal execution}
+
+%         % ---------------- LOW-LEVEL EXECUTION LOOP ----------------
+%         \State \textbf{// Execute low-level policy until goal completion}
+%         \While{true}
+%             \State $s_{\text{current}} \gets s_{t+k}$ \Comment{Current state}
+            
+%             \State \textbf{// Low-level action selection}
+%             \State Sample $u \sim \text{Uniform}(0,1)$
+%             \If{$u < \epsilon_L$}
+%                 \State $a \sim \text{Uniform}(\mathcal{A})$ \Comment{Explore}
+%             \Else
+%                 \State $a \gets \arg\max_{a'\in\mathcal{A}} Q^L_\phi(s_{\text{current}},g_t,a')$ \Comment{Exploit}
+%             \EndIf
+
+%             \State \textbf{// Execute action in environment}
+%             \State Execute $a$ in environment
+%             \State Observe reward $r$, next state $s_{\text{next}}$, done flag $d$
+            
+%             \State \textbf{// Compute intrinsic reward and sub-task termination}
+%             \State $\text{goal\_achieved} \gets \tau(s_{\text{next}}, g_t)$ 
+%             \State $r_{\text{int}} \gets r_{\text{int}}(s_{\text{current}}, g_t, s_{\text{next}})$ 
+%             \State $d_{\text{sub}} \gets d \lor \text{goal\_achieved}$ \Comment{Sub-task done if goal reached or episode ends}
+
+%             \State \textbf{// Store low-level transition}
+%             \State $\mathcal{D}_L \gets \mathcal{D}_L \cup \{(s_{\text{current}},g_t,a,r_{\text{int}},s_{\text{next}},d_{\text{sub}})\}$
+
+%             \State \textbf{// Accumulate high-level discounted extrinsic reward}
+%             \State $R^H \gets R^H + \gamma^{k} \cdot r$
+
+%             \State \textbf{// Low-level Q-learning update}
+%             \If{$|\mathcal{D}_L| \ge N_{\text{warmup}}$}
+%                 \State Sample mini-batch $\mathcal{B}_L$ from $\mathcal{D}_L$
+%                 \State Perform low-level update (Section 3)
+%             \EndIf
+
+%             \State $k \gets k + 1$ \Comment{Increment step counter}
+
+%             \State \textbf{// Check termination conditions}
+%             \If{$d = 1$ \textbf{ or } $\text{goal\_achieved} = 1$}
+%                 \State $s_{\text{end}} \gets s_{\text{next}}$ \Comment{Final state after goal execution}
+%                 \State $d_{\text{end}} \gets d$ \Comment{Environment termination flag}
+%                 \State $T_g \gets k$ \Comment{Total steps taken for this goal}
+%                 \State \textbf{break} \Comment{Exit low-level loop}
+%             \EndIf
+
+%         \EndWhile
+
+%         % ---------------- HIGH-LEVEL TRANSITION ----------------
+%         \State \textbf{// Store high-level transition}
+%         \State $\mathcal{D}_H \gets \mathcal{D}_H \cup \{(s_{\text{start}}, g_t, R^H, s_{\text{end}}, d_{\text{end}}, T_g)\}$
+
+%         \State \textbf{// High-level Q-learning update}
+%         \If{$|\mathcal{D}_H| \ge N_{\text{warmup}}$}
+%             \State Sample mini-batch $\mathcal{B}_H$ from $\mathcal{D}_H$
+%             \State Perform high-level update (Section 4)
+%         \EndIf
+
+%         \State $t \gets t + T_g$ \Comment{Advance global timestep by goal duration}
+
+%         \If{$d_{\text{end}} = 1$}
+%             \State \textbf{break} \Comment{Episode terminated}
+%         \EndIf
+
+%     \EndWhile
+% \EndFor
+
+% \end{algorithmic}
+% \end{algorithm}
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{3. Low-Level Q-Learning Update}
+
+% Sample mini-batch:
+% \[
+% \mathcal{B}_L=\{(s^{(i)},g^{(i)},a^{(i)},r_{\text{int}}^{(i)},s'^{(i)},d_{\text{sub}}^{(i)})\}_{i=1}^B \sim \mathcal{D}_L
+% \]
+
+% Compute TD targets using \textbf{intrinsic rewards} and \textbf{sub-task termination}:
+% \[
+% y_i^L = r_{\text{int}}^{(i)} + \gamma(1-d_{\text{sub}}^{(i)}) \max_{a'} Q^L_{\phi^-}(s'^{(i)}, g^{(i)}, a')
+% \]
+
+% \textbf{Key properties:}
+% \begin{itemize}
+%     \item $r_{\text{int}}^{(i)}$ provides goal-oriented feedback, solving the sparse reward problem
+%     \item $d_{\text{sub}}^{(i)} = 1$ when goal is achieved \textbf{or} environment terminates
+%     \item Setting $d_{\text{sub}} = 1$ upon goal achievement prevents bootstrapping from states beyond the goal boundary, ensuring proper value estimation for the sub-task
+% \end{itemize}
+
+% Compute loss:
+% \[
+% \mathcal{L}^L(\phi)=\frac{1}{B}\sum_{i=1}^B \left(Q^L_\phi(s^{(i)},g^{(i)},a^{(i)})-y_i^L\right)^2
+% \]
+
+% Gradient update:
+% \[
+% \phi \gets \phi - \eta_L \nabla_\phi \mathcal{L}^L(\phi)
+% \]
+
+% Soft target network update:
+% \[
+% \phi^- \gets \tau_{\text{target}}\phi + (1-\tau_{\text{target}})\phi^-
+% \]
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{4. High-Level Q-Learning Update (SMDP Formulation)}
+
+% Sample mini-batch:
+% \[
+% \mathcal{B}_H=\{(s^{(i)},g^{(i)},R^{(i)},s'^{(i)},d^{(i)},T_g^{(i)})\}_{i=1}^B \sim \mathcal{D}_H
+% \]
+
+% Compute TD targets with \textbf{goal-duration discounting} (Semi-Markov Decision Process):
+% \[
+% y_i^H = R^{(i)} + \gamma^{T_g^{(i)}}(1-d^{(i)}) \max_{g'} Q^H_{\Phi^-}(s'^{(i)},g')
+% \]
+
+% \textbf{Rationale:} 
+% The return $R^{(i)}$ is computed as:
+% \[
+% R^{(i)} = \sum_{\ell=0}^{T_g^{(i)}-1} \gamma^\ell r_{t+\ell}
+% \]
+% This is the discounted sum of extrinsic rewards over $T_g^{(i)}$ primitive timesteps. To maintain temporal consistency in the Bellman equation, the bootstrap value at the next high-level state $s'^{(i)}$ must be discounted by $\gamma^{T_g^{(i)}}$, accounting for the time elapsed during goal execution.
+
+% Compute loss:
+% \[
+% \mathcal{L}^H(\Phi)=\frac{1}{B}\sum_{i=1}^B 
+% \left(Q^H_\Phi(s^{(i)},g^{(i)})-y_i^H\right)^2
+% \]
+
+% Gradient update:
+% \[
+% \Phi \gets \Phi - \eta_H \nabla_\Phi \mathcal{L}^H(\Phi)
+% \]
+
+% Soft target network update:
+% \[
+% \Phi^- \gets \tau_{\text{target}}\Phi + (1-\tau_{\text{target}})\Phi^-
+% \]
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{5. Summary of Key Design Principles}
+
+% \begin{enumerate}
+%     \item \textbf{Temporal Abstraction (SMDP):} The high-level policy operates in extended time by selecting goals that persist for variable durations. The Q-function update accounts for this via $\gamma^{T_g}$ discounting.
+    
+%     \item \textbf{Dual Reward Structure:}
+%     \begin{itemize}
+%         \item \textbf{Low-level:} Uses intrinsic rewards $r_{\text{int}}(s,g,s')$ to learn goal-conditioned behavior
+%         \item \textbf{High-level:} Uses extrinsic environment rewards $r$ to learn which goals lead to task success
+%     \end{itemize}
+    
+%     \item \textbf{Goal-Aware Termination:} Low-level transitions use $d_{\text{sub}} = d_{\text{env}} \lor \tau(s',g)$ to treat goal achievement as a terminal state for the sub-task, preventing value contamination.
+    
+%     \item \textbf{Hierarchical Exploration:} Independent $\epsilon$-greedy exploration at both levels allows the hierarchy to discover both useful goals and effective low-level policies.
+    
+%     \item \textbf{Decoupled Learning:} Separate replay buffers and target networks for each level enable stable off-policy learning at different temporal scales.
+% \end{enumerate}
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{6. Common Intrinsic Reward Functions}
+
+% The choice of $r_{\text{int}}(s, g, s')$ significantly impacts low-level learning:
+
+% \begin{itemize}
+%     \item \textbf{Binary sparse:} 
+%     \[
+%     r_{\text{int}}(s,g,s') = \begin{cases} +1 & \text{if } \tau(s',g)=1 \\ 0 & \text{otherwise} \end{cases}
+%     \]
+%     Simple but provides no gradient for learning.
+    
+%     \item \textbf{Binary with step penalty:} 
+%     \[
+%     r_{\text{int}}(s,g,s') = \begin{cases} +1 & \text{if } \tau(s',g)=1 \\ -0.01 & \text{otherwise} \end{cases}
+%     \]
+%     Encourages faster goal completion.
+    
+%     \item \textbf{Distance-based (continuous goals):} 
+%     \[
+%     r_{\text{int}}(s,g,s') = -\|f(s') - f(g)\|_2
+%     \]
+%     where $f: \mathcal{S} \cup \mathcal{G} \to \mathbb{R}^d$ embeds states and goals in a metric space. Provides dense learning signal.
+    
+%     \item \textbf{Shaped reward:}
+%     \[
+%     r_{\text{int}}(s,g,s') = \begin{cases} 
+%     +10 & \text{if } \tau(s',g)=1 \\
+%     \gamma \Phi(s',g) - \Phi(s,g) & \text{otherwise}
+%     \end{cases}
+%     \]
+%     where $\Phi(s,g)$ is a potential function (e.g., negative distance to goal). This is theoretically equivalent to sparse rewards under certain conditions.
+% \end{itemize}
+
+% % ---------------------------------------------------------------------------
+
+
+\newpage
+\pagebreak
+
+% \section*{Generic Curriculum Learning for Discrete-Action Q-Learning (CL--DQL)}
+% Curriculum Learning (CL) gradually increases the difficulty of tasks presented to an RL agent.  
+% The agent is trained first on simpler tasks and then on progressively harder ones, improving sample efficiency, stability, and convergence.
+
+% This framework applies specifically to \textbf{discrete action spaces} using Q-learning methods.
+
+% \subsection*{0. Notation}
+
+% \begin{itemize}
+%     \item $s_t \in \mathcal{S}$: environment state at timestep $t$
+%     \item $a_t \in \mathcal{A}$: action at timestep $t$ (where $\mathcal{A}$ is a \textbf{finite, discrete} action set)
+%     \item $r_{t+1}$: reward received after taking $a_t$
+%     \item $s_{t+1}$: next state
+%     \item $d_{t+1}\in\{0,1\}$: termination flag entering $s_{t+1}$
+%     \item $\mathcal{T}=\{T_1,\dots,T_K\}$: a sequence of tasks ordered by difficulty
+%     \item $T_k$: the task at curriculum level $k$ ($1 =$ easiest)
+%     \item $Q_\phi(s,a)$: Q-network
+%     \item $Q_{\phi^-}(s,a)$: target Q-network
+%     \item $\epsilon$: exploration rate
+%     \item $\gamma\in[0,1)$: discount factor
+%     \item $\eta$: learning rate
+%     \item $\mathcal{D}$: replay buffer
+%     \item $B$: mini-batch size
+%     \item $\tau_{\text{target}}$: soft-update rate for target network
+%     \item $P_{\text{progress}}(T_k)$: curriculum progression criterion for task $T_k$
+%           (e.g., average return threshold, success rate threshold)
+% \end{itemize}
+
+% \subsection*{1. Initialization}
+
+% Initialize Q-network: \[Q_\phi(s,a)\]
+% Initialize target network: \[Q_{\phi^-}\gets Q_\phi\]
+% Initialize replay buffer:\[\mathcal{D}=\emptyset\]
+% Set curriculum index:\[k\gets 1\]
+% (i.e., start on the easiest task $T_1$)
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{2. Main Training Loop with Curriculum Progression}
+
+% \begin{algorithm}[H]
+% \caption{Curriculum Learning for Discrete-Action Q-Learning}
+% \begin{algorithmic}[1]
+
+% \State $k\gets 1$ \Comment{Start with easiest task $T_1$}
+
+% \While{$k \le K$} \Comment{Proceed through curriculum levels}
+
+%     \For{each episode under task $T_k$}
+%         \State Reset environment for task $T_k$ and observe $s_0$
+%         \State $t\gets 0$
+
+%         \While{$t < T_{\max}$}
+
+%             % ---------------- ACTION SELECTION (DISCRETE) ----------------
+%             \State Sample $u \sim \text{Uniform}(0,1)$
+%             \If{$u < \epsilon$}
+%                 \State $a_t \sim \text{Uniform}(\mathcal{A})$ \Comment{Explore: random discrete action}
+%             \Else
+%                 \State $a_t \gets \arg\max_{a\in\mathcal{A}} Q_\phi(s_t,a)$ \Comment{Exploit: greedy over discrete actions}
+%             \EndIf
+
+%             % ---------------- TRANSITION ----------------
+%             \State Execute $a_t$ under task $T_k$
+%             \State Observe $r_{t+1}$, $s_{t+1}$, $d_{t+1}$
+
+%             % ---------------- STORE TRANSITION ----------------
+%             \State $\mathcal{D}\gets \mathcal{D} \cup \{(s_t,a_t,r_{t+1},s_{t+1},d_{t+1})\}$
+
+%             % ---------------- Q-LEARNING UPDATE ----------------
+%             \If{$|\mathcal{D}|\ge B$}
+%                 \State Sample mini-batch $\mathcal{B}$ of size $B$ from $\mathcal{D}$
+
+%                 \For{each transition $(s^{(i)},a^{(i)},r^{(i)},s'^{(i)},d^{(i)})\in\mathcal{B}$}
+%                     \State Compute target (using discrete max):
+%                     \[
+%                     y_i = r^{(i)} + \gamma(1-d^{(i)})\max_{a'\in\mathcal{A}}Q_{\phi^-}(s'^{(i)},a')
+%                     \]
+%                 \EndFor
+
+%                 \State Compute loss:
+%                 \[
+%                 \mathcal{L}(\phi)=\frac{1}{B}\sum_{i=1}^B\left(Q_\phi(s^{(i)},a^{(i)})-y_i\right)^2
+%                 \]
+
+%                 \State Update Q-network:
+%                 \[
+%                 \phi \gets \phi - \eta\nabla_\phi \mathcal{L}(\phi)
+%                 \]
+
+%                 \State Soft-update target network:
+%                 \[
+%                 \phi^- \gets \tau_{\text{target}}\phi + (1-\tau_{\text{target}})\phi^-
+%                 \]
+%             \EndIf
+
+%             % ---------------- TIME UPDATE ----------------
+%             \State $t\gets t+1$
+
+%             \If{$d_{t}=1$}
+%                 \State \textbf{break}
+%             \EndIf
+
+%         \EndWhile
+
+%         % ---------------- CURRICULUM PROGRESSION CHECK ----------------
+%         \If{$P_{\text{progress}}(T_k)=1$}
+%             \State $k \gets k+1$  \Comment{Move to next task in curriculum}
+%             \State \textbf{break}
+%         \EndIf
+
+%     \EndFor
+
+% \EndWhile
+
+% \end{algorithmic}
+% \end{algorithm}
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{3. Curriculum Progression Criteria (Generic $P_{\text{progress}}$)}
+
+% A task $T_k$ is considered ``mastered'' when:
+% \[
+% P_{\text{progress}}(T_k)=
+% \begin{cases}
+% 1, & \text{if success-rate}(T_k) \ge \alpha, \\[6pt]
+% 1, & \text{if average episodic return} \ge R_{\text{threshold}},\\[6pt]
+% 1, & \text{if agent solves the task consistently for $N$ episodes},\\[6pt]
+% 0, & \text{otherwise}.
+% \end{cases}
+% \]
+
+% Examples of valid progression signals:
+% \begin{itemize}
+%     \item Reaching a goal location at least $\alpha\%$ of episodes.
+%     \item Solving a maze of current difficulty consistently.
+%     \item Achieving a threshold return.
+%     \item Convergence of TD updates (small Bellman error).
+% \end{itemize}
+
+% % ---------------------------------------------------------------------------
+
+
+\newpage
+\pagebreak
+
+
+
+
+% ---------------------------------------------------------------------------
+
+% \section*{Generic Multi-Agent Reinforcement Learning (Discrete Action Space)}
+
+% We consider a fully generic multi-agent Markov game with $N$ agents, discrete actions,
+% decentralized execution, and optionally centralized critics. The formulation is suitable
+% for cooperative, competitive, or mixed multi-agent environments.
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{0. Notation (Short, Complete)}
+
+% \begin{itemize}
+%     \item $N$: number of agents.
+%     \item $s_t \in \mathcal{S}$: global state at timestep $t$.
+%     \item $\mathcal{O}^{(i)}(s_t)$: observation available to agent $i$ at state $s_t$.
+%     \item $a_t^{(i)} \in \mathcal{A}^{(i)}$: discrete action of agent $i$.
+%     \item $a_t = (a_t^{(1)},\dots,a_t^{(N)})$: joint action.
+%     \item $r_{t+1}^{(i)}$: reward of agent $i$ at time $t+1$.
+%     \item $s_{t+1}$: next state.
+%     \item $d_{t+1} \in \{0,1\}$: termination flag.
+%     \item $\pi_{\theta_i}(a^{(i)} \mid \mathcal{O}^{(i)}(s))$: decentralized policy of agent $i$.
+%     \item $Q_{\phi_i}(s, a^{(i)}, a^{-i})$: centralized critic for agent $i$ (CTDE).
+%     \item $V_{\psi_i}(s)$: value function of agent $i$.
+%     \item $\gamma$: discount factor.
+%     \item Replay buffer: $\mathcal{D}$ containing full joint transitions.
+% \end{itemize}
+
+% Joint dynamics:
+% \[
+% s_{t+1} \sim p(s_{t+1} \mid s_t, a_t).
+% \]
+
+% Objective for each agent:
+% \[
+% J(\pi_{\theta_i}) = 
+% \mathbb{E}\left[\sum_{t=0}^{T-1} \gamma^t r_{t+1}^{(i)}\right].
+% \]
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{1. Decentralized Actors with Optional Centralized Critics (CTDE)}
+
+% \paragraph{Actors (execution):}
+% Each agent acts independently:
+% \[
+% a_t^{(i)} \sim \pi_{\theta_i}(\cdot \mid \mathcal{O}^{(i)}(s_t)).
+% \]
+
+% \paragraph{Centralized critic (training only):}
+% \[
+% Q_{\phi_i}(s_t, a_t^{(i)}, a_t^{-i})
+% \]
+% can use the full state and/or full joint action for stable training.
+
+% During execution, only $\pi_{\theta_i}$ is used.
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{2. Bellman Target (Per-Agent)}
+
+% For each agent $i$, the target for critic learning is:
+% \[
+% y^{(i)} 
+% =
+% r_{t+1}^{(i)}
+% + \gamma (1 - d_{t+1})
+% \max_{a'^{(i)}} Q_{\phi_i^-}(s_{t+1}, a'^{(i)}, a_{t+1}^{-i}).
+% \]
+
+% Here:
+% \[
+% a_{t+1}^{-i} = (a_{t+1}^{(1)},\dots,a_{t+1}^{(i-1)},a_{t+1}^{(i+1)},\dots,a_{t+1}^{(N)})
+% \]
+% comes from the next-step joint action under current policies.
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{3. Critic Loss (Per-Agent)}
+
+% \[
+% \mathcal{L}^{(i)}_{\text{critic}}
+% =
+% \mathbb{E}_{(s,a,r^{(i)},s',d) \sim \mathcal{D}}
+% \Big[
+% \left(Q_{\phi_i}(s, a^{(i)}, a^{-i}) - y^{(i)}\right)^{2}
+% \Big].
+% \]
+
+% This is a standard TD(0) loss with joint information used for stability.
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{4. Policy Gradient (Decentralized Execution)}
+
+% The decentralized actor is updated using advantage-weighted gradients:
+
+% \[
+% \nabla_{\theta_i} J(\pi_{\theta_i})
+% =
+% \mathbb{E}
+% \Big[
+% \nabla_{\theta_i} \log \pi_{\theta_i}(a^{(i)} \mid \mathcal{O}^{(i)}(s))
+% \cdot A^{(i)}(s, a^{(i)})
+% \Big].
+% \]
+
+% Advantage for agent $i$:
+% \[
+% A^{(i)}(s,a^{(i)})
+% =
+% Q_{\phi_i}(s, a^{(i)}, a^{-i})
+% -
+% V_{\psi_i}(s).
+% \]
+
+% Value function:
+% \[
+% V_{\psi_i}(s)
+% =
+% \mathbb{E}_{a^{(i)}\sim\pi_{\theta_i}}
+% \left[ 
+% Q_{\phi_i}(s, a^{(i)}, a^{-i})
+% \right].
+% \]
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{5. Value Function Learning (Optional)}
+
+% Value loss:
+% \[
+% \mathcal{L}^{(i)}_V
+% =
+% \mathbb{E}
+% \left[
+% \big(V_{\psi_i}(s_t) - R_t^{(i)}\big)^2
+% \right],
+% \]
+% where
+% \[
+% R_t^{(i)} = \sum_{l=0}^{T-t-1}\gamma^l r_{t+l+1}^{(i)}.
+% \]
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{6. Multi-Agent Transition Dataset}
+
+% Replay buffer contains full joint information:
+% \[
+% \mathcal{D}
+% =
+% \Big\{
+% (s_t,
+% a_t^{(1)},\dots,a_t^{(N)},
+% r_{t+1}^{(1)},\dots,r_{t+1}^{(N)},
+% s_{t+1},
+% d_{t+1})
+% \Big\}.
+% \]
+
+% Full-state and full-joint-action storage enables CTDE.
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{7. Training Updates (Per-Agent)}
+
+% \paragraph{Critic Update:}
+% \[
+% \phi_i \gets \phi_i - \eta_\phi \nabla_{\phi_i} 
+% \mathcal{L}^{(i)}_{\text{critic}}.
+% \]
+
+% \paragraph{Actor Update:}
+% \[
+% \theta_i \gets \theta_i + \eta_\theta \nabla_{\theta_i} J(\pi_{\theta_i}).
+% \]
+
+% \paragraph{Target Network Update:}
+% \[
+% \phi_i^{-} \gets \tau \phi_i + (1-\tau)\phi_i^{-}.
+% \]
+
+% These are repeated for each agent $i=1,\dots,N$.
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{8. Optional: Value Factorization for Cooperative MARL}
+
+% In fully cooperative settings, a factored value function can be used:
+
+% \[
+% Q_{\text{tot}}(s,a^{(1)},\dots,a^{(N)})
+% = f_{\text{mix}}(Q_1,\dots,Q_N),
+% \]
+
+% where $f_{\text{mix}}$ is constrained to be monotonic (QMIX) or additive (VDN).
+
+% This enables coordinated learning while keeping decentralized execution.
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{9. Decentralized Execution}
+
+% At deployment time, agents act independently using only their own observations:
+
+% \[
+% a_t^{(i)} = 
+% \arg\max_{a} \pi_{\theta_i}(a \mid \mathcal{O}^{(i)}(s_t)).
+% \]
+
+% Critics and joint state information are not required at execution time.
+
+% % ---------------------------------------------------------------------------
+
+% \subsection*{10. Summary (Fully Generic)}
+
+% \begin{enumerate}
+%     \item \textbf{CTDE}: centralized training with decentralized execution.
+%     \item \textbf{Discrete policies}: each agent uses $\pi_{\theta_i}(a\mid o)$.
+%     \item \textbf{Critics}: can depend on global state and joint actions.
+%     \item \textbf{Individual advantage calculation}: ensures correct gradients.
+%     \item \textbf{Terminal masking}: $(1-d_{t+1})$ prevents bootstrap at terminal states.
+%     \item \textbf{Fully generic}: applies to cooperative, competitive, or mixed settings.
+%     \item \textbf{No off-by-one errors}: all transitions use $(s_t,a_t,r_{t+1},s_{t+1},d_{t+1})$.
+% \end{enumerate}
+
+% 4. Latent Dynamical Models (World Models)
+
+% These learn compact latent state spaces → plan in imagination.
+
+% �� 4.1. World Models (Ha & Schmidhuber)
+
+% Learn VAE + MDN-RNN latent dynamics.
+
+% Plan using CMA-ES or random shooting.
+
+% �� 4.2. PlaNet
+
+% Latent dynamics via Recurrent State-Space Model (RSSM).
+
+% Planning using Cross-Entropy MPC.
+
+% �� 4.3. Dreamer (V1/V2/V3)
+
+% Actor-critic entirely inside the latent world.
+
+% Learn reward, transition, and value all in latent space.
+
+% DreamerV3 = state-of-the-art general agent.
+
+
+% �� 8.1. DreamerV3
+
+% Breakthrough general world-model agent.
+
+% �� 8.2. IRIS / GenDP / Dyna-Tree
+
+% Diffusion models for dynamics modeling.
+
+% �� 8.3. MDP Transformers / Decision Transformers + Models
+
+% Sequence models predicting trajectories + planning.
+
+% �� 8.4. SMAC Zero / AlphaZero for Multi-Agent Systems
+
+% Deep planning + latent models.
+
+\end{document}
+
+
+
+
+
+
